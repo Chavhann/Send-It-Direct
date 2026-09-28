@@ -83,7 +83,7 @@ const Chat = () => {
             </div>
 
             {}
-            <div className="flex justify-between bottom-1 w-full space-x-1">
+            <div className="mt-3 flex w-full items-center gap-2 border-t border-border/60 pt-3">
               <div className="flex min-w-0 flex-1">
                 <Input
                   type="text"
