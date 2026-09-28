@@ -3,14 +3,12 @@
 import React from "react";
 import ShareCard from "./ShareCard";
 import Chat from "./Chat";
-import { ShootingStars } from "@/components/ui/shootingStars";
-import { StarsBackground } from "@/components/ui/starsBg";
+import { SiteFooter } from "./Footer";
+
 
 const Share = () => {
   return (
     <main className="relative min-h-[calc(100vh-72px)] overflow-hidden">
-      <ShootingStars />
-      <StarsBackground />
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8 lg:pt-12">
         <header className="mx-auto mb-8 max-w-3xl text-center">
@@ -44,6 +42,8 @@ const Share = () => {
           peer data is transferred through the established WebRTC connection.
         </div>
       </div>
+
+      <SiteFooter />
     </main>
   );
 };
