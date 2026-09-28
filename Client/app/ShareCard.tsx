@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -26,6 +26,26 @@ import { useSearchParams } from "next/navigation";
 import { Dots_v3 } from "@/components/ui/dots";
 import { EyeCatchingButton_v1 } from "@/components/ui/shimmerButton";
 
+import { sendFile } from "../transfer/sender";
+import { FileReceiver } from "../transfer/receiver";
+import { createTransferId, parseTransferMessage } from "../transfer/protocol";
+
+const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
+const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+
+if (!turnUrl || !turnUsername || !turnCredential) {
+  throw new Error("WebRTC TURN configuration is not configured.");
+}
+
+const iceServers = [
+  {
+    urls: turnUrl,
+    username: turnUsername,
+    credential: turnCredential,
+  },
+];
+
 const ShareCard = () => {
   const userDetails = useSocket();
 
@@ -35,7 +55,7 @@ const ShareCard = () => {
   const [currentConnection, setcurrentConnection] = useState(false);
 
   const peerRef = useRef<any>();
-  const workerRef = useRef<Worker>();
+  const receiverRef = useRef<FileReceiver>();
 
   const [userId, setuserId] = useState<any>();
   const [signalingData, setsignalingData] = useState<any>();
@@ -46,15 +66,14 @@ const ShareCard = () => {
   const fileInputRef = useRef<any>();
 
   const [downloadFile, setdownloadFile] = useState<any>();
-  const [fileUploadProgress, setfileUploadProgress] = useState<number>(0);
+  const [fileUploadProgress, setfileUploadProgress] =
+    useState<number>(0);
   const [fileDownloadProgress, setfileDownloadProgress] =
     useState<number>(0);
 
   const [fileNameState, setfileNameState] = useState<any>();
   const [fileSending, setfileSending] = useState(false);
   const [fileReceiving, setfileReceiving] = useState(false);
-
-  const [setname] = useState<any>();
 
   const searchParams = useSearchParams();
 
@@ -83,9 +102,64 @@ const ShareCard = () => {
     }, 3000);
   }
 
-  useEffect(() => {
-    workerRef.current = new Worker(new URL("./w.ts", import.meta.url));
+  const createReceiver = (peer: any) => {
+    receiverRef.current = new FileReceiver(
+      {
+        send: (message: string) => {
+          peer.write(message);
+        },
+      },
+      {
+        onStart: (transfer) => {
+          setfileReceiving(true);
+          setfileDownloadProgress(0);
+          setfileNameState(transfer.fileName);
+          setdownloadFile(undefined);
+        },
 
+        onProgress: (_transferId, progress) => {
+          setfileReceiving(true);
+          setfileDownloadProgress(progress);
+        },
+
+        onComplete: (_transferId, file) => {
+          setdownloadFile(file);
+          setfileDownloadProgress(100);
+          setfileReceiving(false);
+          toast.success("File received successfully");
+        },
+
+        onCancel: (_transferId, reason) => {
+          setfileReceiving(false);
+
+          if (reason) {
+            toast.error(reason);
+          }
+        },
+
+        onError: (error) => {
+          setfileReceiving(false);
+          toast.error(error.message || "File transfer failed.");
+        },
+      }
+    );
+  };
+
+  const resetConnectionState = () => {
+    setpartnerId("");
+    setcurrentConnection(false);
+    setfileUpload(undefined);
+    setfileSending(false);
+    setfileReceiving(false);
+    setfileUploadProgress(0);
+    setfileDownloadProgress(0);
+    setterminateCall(false);
+
+    receiverRef.current = undefined;
+    userDetails.setpeerState(undefined);
+  };
+
+  useEffect(() => {
     const handleSignaling = (data: any) => {
       setacceptCaller(true);
       setsignalingData(data);
@@ -107,6 +181,7 @@ const ShareCard = () => {
       setcurrentConnection(true);
       setterminateCall(true);
 
+
       toast.success(`Successful connection with ${partnerId}`);
 
       userDetails.setpeerState(peer);
@@ -122,16 +197,6 @@ const ShareCard = () => {
       toast.error(message || "Server error.");
     };
 
-    const handleWorkerMessage = (event: any) => {
-      if (event.data?.progress !== undefined) {
-        setfileDownloadProgress(Number(event.data.progress));
-      } else if (event.data?.blob) {
-        setdownloadFile(event.data.blob);
-        setfileDownloadProgress(0);
-        setfileReceiving(false);
-      }
-    };
-
     const sharedCode = searchParams.get("code");
 
     if (sharedCode) {
@@ -143,87 +208,115 @@ const ShareCard = () => {
     userDetails.socket.on("signal-error", handleSignalError);
     userDetails.socket.on("server-error", handleServerError);
 
-    workerRef.current.addEventListener("message", handleWorkerMessage);
-
     return () => {
       userDetails.socket.off("signaling", handleSignaling);
       userDetails.socket.off("callAccepted", handleCallAccepted);
       userDetails.socket.off("signal-error", handleSignalError);
       userDetails.socket.off("server-error", handleServerError);
 
-      workerRef.current?.removeEventListener(
-        "message",
-        handleWorkerMessage
-      );
-
       peerRef.current?.destroy();
-      workerRef.current?.terminate();
 
       peerRef.current = undefined;
-      workerRef.current = undefined;
+      receiverRef.current = undefined;
     };
-  }, [searchParams, userDetails]);
+  }, [searchParams, userDetails.socket, userDetails.setpeerState]);
+
+  const handlePeerData = (data: any) => {
+    try {
+      let payload: string;
+
+      if (typeof data === "string") {
+        payload = data;
+      } else if (data instanceof Uint8Array) {
+        payload = new TextDecoder().decode(data);
+      } else if (data instanceof ArrayBuffer) {
+        payload = new TextDecoder().decode(new Uint8Array(data));
+      } else {
+        payload = String(data);
+      }
+
+      const rawMessage = JSON.parse(payload);
+
+      // Chat messages are handled by Chat.tsx.
+      if (rawMessage?.type === "messages") {
+        return;
+      }
+
+      const transferTypes = new Set([
+        "transfer-start",
+        "transfer-chunk",
+        "transfer-ack",
+        "transfer-complete",
+        "transfer-cancel",
+        "transfer-error",
+      ]);
+
+      if (!transferTypes.has(rawMessage?.type)) {
+        console.warn(
+          "[WebRTC] Ignoring unknown data message:",
+          rawMessage
+        );
+        return;
+      }
+
+      const message = parseTransferMessage(payload);
+
+      console.log(
+        "[WebRTC] Transfer message:",
+        message.type
+      );
+
+      receiverRef.current?.handleMessage(message);
+    } catch (error) {
+      const normalizedError =
+        error instanceof Error
+          ? error
+          : new Error("Invalid transfer message.");
+
+      console.error(
+        "[WebRTC] Transfer data error:",
+        normalizedError
+      );
+
+      toast.error(normalizedError.message);
+    }
+  };
+  const registerPeerLifecycle = (peer: any) => {
+    peer.on("data", handlePeerData);
+
+    peer.on("close", () => {
+      resetConnectionState();
+    });
+
+    peer.on("error", (err: any) => {
+      console.error("WebRTC peer error:", err);
+
+      setisLoading(false);
+      setcurrentConnection(false);
+      setterminateCall(false);
+      setfileSending(false);
+      setfileReceiving(false);
+
+      toast.error("Peer connection error.");
+    });
+  };
 
   const callUser = () => {
     const peer = new Peer({
       initiator: true,
       trickle: false,
-      config: {
-        iceServers: [
-          {
-            urls: "turn:openrelay.metered.ca:80",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-          {
-            urls: "turn:numb.viagenie.ca",
-            credential: "muazkh",
-            username: "webrtc@live.com",
-          },
-        ],
-      },
+      config: { iceServers },
     });
 
     peerRef.current = peer;
+    createReceiver(peer);
+    registerPeerLifecycle(peer);
 
     peer.on("signal", (data) => {
       userDetails.socket.emit("send-signal", {
         signalData: data,
         to: partnerId,
       });
-    });
-
-    peer.on("data", (data) => {
-      const parsedData = JSON.parse(data);
-
-      if (parsedData.chunk) {
-        setfileReceiving(true);
-        handleReceivingData(parsedData.chunk);
-      } else if (parsedData.done) {
-        handleReceivingData(parsedData);
-        toast.success("File received successfully");
-      } else if (parsedData.info) {
-        handleReceivingData(parsedData);
-      }
-    });
-
-    peer.on("close", () => {
-      setpartnerId("");
-      setcurrentConnection(false);
-      setfileUpload(false);
-      setterminateCall(false);
-
-      userDetails.setpeerState(undefined);
-    });
-
-    peer.on("error", (err) => {
-      console.error("WebRTC peer error:", err);
-
-      setisLoading(false);
-      setcurrentConnection(false);
-      setterminateCall(false);
-
-      toast.error("Peer connection error.");
     });
   };
 
@@ -236,60 +329,32 @@ const ShareCard = () => {
     const peer = new Peer({
       initiator: false,
       trickle: false,
+      config: { iceServers },
     });
 
     peerRef.current = peer;
-
-    userDetails.setpeerState(peer);
+    createReceiver(peer);
+    registerPeerLifecycle(peer);
 
     peer.on("signal", (data) => {
       userDetails.socket.emit("accept-signal", {
         signalData: data,
-        to: partnerId,
+        to: signalingData.from,
       });
+    });
 
+    peer.on("connect", () => {
       setcurrentConnection(true);
       setacceptCaller(false);
       setterminateCall(true);
 
+      userDetails.setpeerState(peer);
+
       toast.success(`Successful connection with ${partnerId}`);
     });
 
-    peer.on("data", (data) => {
-      const parsedData = JSON.parse(data);
-
-      if (parsedData.chunk) {
-        setfileReceiving(true);
-        handleReceivingData(parsedData.chunk);
-      } else if (parsedData.done) {
-        handleReceivingData(parsedData);
-        toast.success("File received successfully");
-      } else if (parsedData.info) {
-        handleReceivingData(parsedData);
-      }
-    });
-
     peer.signal(signalingData.signalData);
-
-    peer.on("close", () => {
-      setpartnerId("");
-      setcurrentConnection(false);
-      setfileUpload(false);
-      setterminateCall(false);
-
-      userDetails.setpeerState(undefined);
-    });
-
-    peer.on("error", (err) => {
-      console.error("WebRTC peer error:", err);
-
-      setcurrentConnection(false);
-      setterminateCall(false);
-
-      toast.error("Peer connection error.");
-    });
   };
-
   const handleConnectionMaking = () => {
     const normalizedPartnerId = partnerId.trim();
 
@@ -313,31 +378,21 @@ const ShareCard = () => {
   };
 
   const handleFileUploadBtn = () => {
-    fileInputRef.current.click();
+    fileInputRef.current?.click();
   };
 
   const handleFileChange = (e: any) => {
-    setfileUpload(e.target.files);
+    const files = e.target.files;
+
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setfileUpload(files);
+    setfileUploadProgress(0);
   };
 
-  function handleReceivingData(data: any) {
-    if (data.info) {
-      workerRef.current?.postMessage({
-        status: "fileInfo",
-        fileSize: data.fileSize,
-      });
-
-      setfileNameState(data.fileName);
-      setname(data.fileName);
-    } else if (data.done) {
-      workerRef.current?.postMessage("download");
-    } else {
-      setdownloadFile("sjdf");
-      workerRef.current?.postMessage(data);
-    }
-  }
-
-  const handleWebRTCUpload = () => {
+  const handleWebRTCUpload = async () => {
     const peer = peerRef.current;
     const file = fileUpload?.[0];
 
@@ -351,66 +406,44 @@ const ShareCard = () => {
       return;
     }
 
-    const chunkSize = 16 * 1024;
-    let offset = 0;
+    if (!peer.connected) {
+      toast.error("Peer connection is not ready.");
+      return;
+    }
 
-    const readAndSendChunk = () => {
-      const chunk = file.slice(offset, offset + chunkSize);
-      const reader = new FileReader();
+    const transferId = createTransferId();
 
-      if (offset === 0) {
-        setfileSending(true);
+    setfileSending(true);
+    setfileUploadProgress(0);
 
-        const fileInfo = {
-          info: true,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-        };
+    try {
+      await sendFile({
+        channel: {
+          send: (message: string) => {
+            peer.write(message);
+          },
+        },
+        file,
+        transferId,
 
-        peer.write(JSON.stringify(fileInfo));
-      }
+        onProgress: (progress) => {
+          setfileUploadProgress(progress);
+        },
 
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const chunkData: any = event.target.result;
-          const uint8ArrayChunk = new Uint8Array(chunkData);
+        onComplete: () => {
+          setfileUploadProgress(100);
+          setfileSending(false);
+          toast.success("File sent successfully");
+        },
 
-          const progressPayload = {
-            chunk: Array.from(uint8ArrayChunk),
-            progress: (offset / file.size) * 100,
-          };
-
-          peer.write(JSON.stringify(progressPayload));
-
-          setfileUploadProgress((offset / file.size) * 100);
-
-          offset += chunkSize;
-
-          if (offset < file.size) {
-            readAndSendChunk();
-          } else {
-            peer.write(
-              JSON.stringify({
-                done: true,
-                fileName: file.name,
-                fileSize: file.size,
-                fileType: file.type,
-              })
-            );
-
-            setfileUploadProgress(100);
-            setfileSending(false);
-
-            toast.success("Sended file successfully");
-          }
-        }
-      };
-
-      reader.readAsArrayBuffer(chunk);
-    };
-
-    readAndSendChunk();
+        onError: (error) => {
+          setfileSending(false);
+          toast.error(error.message || "File transfer failed.");
+        },
+      });
+    } catch {
+      setfileSending(false);
+    }
   };
 
   return (
@@ -513,19 +546,17 @@ const ShareCard = () => {
                       : "No connection"}
                   </div>
 
-                  <>
-                    {terminateCall ? (
-                      <Button
-                        variant="destructive"
-                        type="button"
-                        onClick={() => {
-                          peerRef.current?.destroy();
-                        }}
-                      >
-                        Terminate
-                      </Button>
-                    ) : null}
-                  </>
+                  {terminateCall ? (
+                    <Button
+                      variant="destructive"
+                      type="button"
+                      onClick={() => {
+                        peerRef.current?.destroy();
+                      }}
+                    >
+                      Terminate
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -555,14 +586,12 @@ const ShareCard = () => {
               </div>
 
               {downloadFile ? (
-                <>
-                  <FileDownload
-                    fileName={fileNameState}
-                    fileReceivingStatus={fileReceiving}
-                    fileProgress={fileDownloadProgress}
-                    fileRawData={downloadFile}
-                  />
-                </>
+                <FileDownload
+                  fileName={fileNameState}
+                  fileReceivingStatus={fileReceiving}
+                  fileProgress={fileDownloadProgress}
+                  fileRawData={downloadFile}
+                />
               ) : null}
             </div>
           </form>
