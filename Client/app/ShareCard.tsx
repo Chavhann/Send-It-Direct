@@ -180,7 +180,7 @@ const ShareCard = () => {
       setcurrentConnection(true);
       setterminateCall(true);
 
-      toast.success(`Successful connection with ${partnerId}`);
+      toast.success("Peer connection established.");
 
       userDetails.setpeerState(peer);
     };
@@ -217,7 +217,7 @@ const ShareCard = () => {
       peerRef.current = undefined;
       receiverRef.current = undefined;
     };
-  }, [searchParams, userDetails.socket, userDetails.setpeerState, partnerId]);
+  }, [searchParams, userDetails.socket, userDetails.setpeerState]);
 
   const handlePeerData = (data: any) => {
     try {
@@ -350,7 +350,7 @@ const ShareCard = () => {
 
       userDetails.setpeerState(peer);
 
-      toast.success(`Successful connection with ${partnerId}`);
+      toast.success("Peer connection established.");
     });
 
     peer.signal(signalingData.signalData);
