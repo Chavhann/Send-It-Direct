@@ -448,7 +448,7 @@ const ShareCard = () => {
 
   return (
     <>
-      <Card className="sm:max-w-[450px] max-w-[95%] z-10">
+      <Card className="w-full max-w-[720px] border-border/70 bg-card/90 shadow-xl backdrop-blur-sm z-10">
         <CardHeader>
           <CardTitle>Send It Direct</CardTitle>
           <CardDescription>
