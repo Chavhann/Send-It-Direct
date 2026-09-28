@@ -24,7 +24,7 @@ const FileUploadBtn = ({
       <Button
         type="button"
         onClick={uploadBtn}
-        className=" flex gap-x-2"
+        className="h-10 w-full gap-x-2 rounded-xl px-4 transition-all hover:-translate-y-0.5 sm:w-auto"
       >
         <File size={15} />
         Select File
