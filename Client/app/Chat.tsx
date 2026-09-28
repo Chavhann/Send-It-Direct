@@ -58,10 +58,10 @@ const Chat = () => {
   return (
     <>
       {Socket.peerState ? (
-        <div className="flex justify-center sm:w-fit w-full z-10">
-          <div className="flex flex-col flex-wrap border rounded-md sm:min-w-[400px] min-w-[95%] min-h-[400px] p-2">
+        <div className="flex w-full justify-center">
+          <div className="flex min-h-[460px] w-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 p-3 shadow-xl backdrop-blur-sm sm:min-w-[400px]">
             {}
-            <div className="flex-1 overflow-y-auto w-full">
+            <div className="flex-1 w-full overflow-y-auto rounded-xl border border-border/50 bg-muted/10 p-3">
               {messages.map((message, index) => (
                 <div
                   key={index}
@@ -70,7 +70,7 @@ const Chat = () => {
                   } mb-[2px]`}
                 >
                   <div
-                    className={`flex flex-wrap sm:max-w-[200px] max-w-[150px] text-sm rounded-3xl px-3 py-1 ${
+                    className={`flex max-w-[85%] flex-wrap rounded-2xl px-3.5 py-2 text-sm leading-5 shadow-sm sm:max-w-[75%] ${
                       message.sender === "me"
                         ? "bg-blue-500 text-white"
                         : "bg-zinc-700  text-white"
