@@ -1,104 +1,196 @@
-# Zippy
+# Send It Direct
 
-Zippy is a peer to peer file sharing application built with Next.js, allowing users to share files quickly and efficiently. The application leverages WebRTC for real-time communication and socket.io for signaling, providing a seamless user experience.
+> **Send it direct. No cloud. No middleman.**
+
+Send It Direct is a peer-to-peer file sharing and real-time communication application built with WebRTC, Next.js, React, Node.js, Express, and Socket.IO.
+
+The application establishes a direct connection between peers for file and message transfer, while the signaling server is used to coordinate the WebRTC connection.
 
 ## Features
 
-- **P2P File Sharing**: Share files directly between users without the need for a central server.
-- **Real-time Chat**: Communicate with peers while sharing files.
-- **Responsive Design**: Works on various devices and screen sizes.
-- **Easy to Use**: Intuitive interface for quick file sharing.
+- **Peer-to-Peer File Sharing**
+  - Transfer files directly between connected browsers using WebRTC.
 
-## Getting Started
+- **Real-Time Communication**
+  - Exchange messages with connected peers during a sharing session.
 
-To get started with z1ppie, follow these steps:
+- **WebRTC Connectivity**
+  - Uses WebRTC DataChannels for peer-to-peer communication.
+  - Socket.IO handles signaling and connection establishment.
 
-### Prerequisites
+- **Shareable Connection**
+  - Generate a peer connection token/link and share it with another user.
 
-Make sure you have the following installed:
+- **Responsive UI**
+  - Modern interface built with Next.js, React, and Tailwind CSS.
 
-- Node.js (v14 or later)
-- npm (v6 or later) or Yarn
+- **Environment-Based Configuration**
+  - Client and server configuration are controlled through environment variables.
 
-# Zippy-Client
+## Architecture
 
-### Installation
+```text
+                    +----------------------+
+                    ¦    Send It Direct    ¦
+                    ¦       Client A       ¦
+                    +----------------------+
+                               ¦
+                               ¦ WebRTC
+                               ¦ DataChannel
+                               ?
+                    +----------------------+
+                    ¦    Send It Direct    ¦
+                    ¦       Client B       ¦
+                    +----------------------+
 
-1. Clone the repository:
+                         ?           ?
+                         ¦           ¦
+                         ¦ Signaling ¦
+                         ¦           ¦
+                    +---------------------+
+                    ¦   Node.js Server    ¦
+                    ¦ Express + Socket.IO ¦
+                    +--------------------+
+Connection Flow
+Client A connects to the signaling server.
+Client B connects to the signaling server.
+The peers exchange WebRTC signaling information.
+WebRTC establishes a peer-to-peer connection.
+Files and messages are transferred through the WebRTC connection.
+The signaling server handles connection coordination rather than the intended file payload.
+Technology Stack
+Frontend
+Next.js
+React
+TypeScript
+Tailwind CSS
+WebRTC
+Simple Peer
+Socket.IO Client
+Backend
+Node.js
+Express
+Socket.IO
+CORS
+Project Structure
+Send-It-Direct/
+¦
++-- Client/
+¦   +-- app/
+¦   ¦   +-- page.tsx
+¦   ¦   +-- ShareCard.tsx
+¦   ¦   +-- ShareLink.tsx
+¦   ¦   +-- ...
+¦   ¦
+¦   +-- components/
+¦   +-- public/
+¦   +-- package.json
+¦   +-- ...
+¦
++-- Server/
+¦   +-- index.js
+¦   +-- package.json
+¦   +-- ...
+¦
++-- .gitignore
++-- README.md
+Local Development
+Prerequisites
 
-   ```bash
-   git clone https://github.com/ShivaanjayNarula/Zippy.git
-   cd client
-   ```
+Install:
 
-2. Install the dependencies:
+Node.js 18+
+npm
+Git
+1. Clone the repository
+git clone https://github.com/Chavhann/Send-It-Direct.git
+cd Send-It-Direct
+2. Start the Server
+cd Server
+npm install
 
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+Create:
 
-3. Set up your environment variables. Create a `.env` file in the root directory and add your socket server URL:
+Server/.env
 
-   ```
-   NEXT_PUBLIC_SOCKET_SERVER_URL=your_socket_server_url
-   ```
-   > You can use http://localhost:8000 as the socket server url for a local environment.
+Add:
 
-4. Run the development server:
+PORT=8000
+CLIENT_URL=http://localhost:3000
 
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
+Start the server:
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser to see the application in action.
+npm start
 
-# Zippy-Server
+The server will run at:
 
-### Installation
+http://localhost:8000
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ShivaanjayNarula/zippy.git
-   cd server
-   ```
+Health endpoint:
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+http://localhost:8000/health
+3. Start the Client
 
-3. Start the server:
-   ```bash
-   npm start
-   ```
+Open another PowerShell terminal:
 
-4. 5. Open [http://localhost:8000](http://localhost:8000) in your browser to see the application in action.
+cd Client
+npm install
 
-## Usage
-  > Note that both the peers should be on the same network to communicate.
-- Navigate to the home page and click on "Start sharing" to begin.
-- Enter the peer's token to connect and start sharing files.
-- Use the chat feature to communicate with your peers during the file transfer.
+Create:
 
-## Technologies Used
+Client/.env.local
 
-- **Next.js**: A React framework for building server-rendered applications.
-- **WebRTC**: For real-time peer-to-peer communication.
-- **Socket.io**: For signaling and real-time event handling.
-- **React**: A JavaScript library for building user interfaces.
-- **Tailwind CSS**: For styling the application.
-- **Aceternity & Shadcn**: For beautiful components.
+Add:
 
-## Contributing
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-Contributions are welcome! If you have suggestions for improvements or new features, feel free to open an issue or submit a pull request.
+Start the development server:
 
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/YourFeature`).
-3. Make your changes and commit them (`git commit -m 'Add some feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a pull request.
+npm run dev
+
+Open:
+
+http://localhost:3000
+Environment Variables
+Client
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+Server
+PORT=8000
+CLIENT_URL=http://localhost:3000
+
+Environment files should not be committed to the repository.
+
+Engineering Focus
+
+The project focuses on building a reliable browser-based peer-to-peer communication system.
+
+Planned engineering improvements include:
+
+Reliable WebRTC file transfer
+File chunking
+Transfer progress tracking
+Large-file handling
+Transfer retry and recovery
+WebRTC backpressure handling
+Connection lifecycle management
+Input validation
+Secure CORS configuration
+Error handling
+Automated testing
+CI/CD
+Logging and observability
+Production deployment configuration
+Development
+
+The active development branch is:
+
+send-it-direct-development
+
+The main branch is intended to represent the stable version.
+
+Author
+
+Ganesh Chavhan
+
+GitHub:
+https://github.com/Chavhann

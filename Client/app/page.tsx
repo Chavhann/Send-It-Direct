@@ -51,7 +51,7 @@ const Home = () => {
           <EyeCatchingButton_v1>Start sharing files</EyeCatchingButton_v1>
         </Link>
         <Link
-          href={"https://github.com/"}
+          href={"https://github.com/Chavhann/Send-It-Direct"}
           className="flex items-center"
         >
           <EyeCatchingButton_v1>
