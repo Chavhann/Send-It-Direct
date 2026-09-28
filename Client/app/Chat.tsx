@@ -84,13 +84,13 @@ const Chat = () => {
 
             {}
             <div className="flex justify-between bottom-1 w-full space-x-1">
-              <div className="flex w-full">
+              <div className="flex min-w-0 flex-1">
                 <Input
                   type="text"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   ref={inputRef}
-                  placeholder={`Send a message`}
+                  placeholder="Write a message..."
                 />
               </div>
               <div className="">
