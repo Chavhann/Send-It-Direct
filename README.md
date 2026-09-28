@@ -10,54 +10,40 @@ The application establishes a direct connection between peers for file and messa
 
 - **Peer-to-Peer File Sharing**
   - Transfer files directly between connected browsers using WebRTC.
-
 - **Real-Time Communication**
   - Exchange messages with connected peers during a sharing session.
-
 - **WebRTC Connectivity**
   - Uses WebRTC DataChannels for peer-to-peer communication.
   - Socket.IO handles signaling and connection establishment.
-
 - **Shareable Connection**
   - Generate a peer connection token/link and share it with another user.
-
 - **Responsive UI**
   - Modern interface built with Next.js, React, and Tailwind CSS.
-
 - **Environment-Based Configuration**
   - Client and server configuration are controlled through environment variables.
 
 ## Architecture
 
 ```text
-                    +----------------------+
-                    ¦    Send It Direct    ¦
-                    ¦       Client A       ¦
-                    +----------------------+
-                               ¦
-                               ¦ WebRTC
-                               ¦ DataChannel
-                               ?
-                    +----------------------+
-                    ¦    Send It Direct    ¦
-                    ¦       Client B       ¦
-                    +----------------------+
+Client A
+   |
+   | WebRTC DataChannel
+   | Direct P2P connection
+   |
+Client B
 
-                         ?           ?
-                         ¦           ¦
-                         ¦ Signaling ¦
-                         ¦           ¦
-                    +---------------------+
-                    ¦   Node.js Server    ¦
-                    ¦ Express + Socket.IO ¦
-                    +--------------------+
+   ^
+   |
+   | Signaling
+   |
+Node.js + Express + Socket.IO
 Connection Flow
 Client A connects to the signaling server.
 Client B connects to the signaling server.
 The peers exchange WebRTC signaling information.
 WebRTC establishes a peer-to-peer connection.
 Files and messages are transferred through the WebRTC connection.
-The signaling server handles connection coordination rather than the intended file payload.
+The signaling server handles connection coordination.
 Technology Stack
 Frontend
 Next.js
@@ -74,31 +60,28 @@ Socket.IO
 CORS
 Project Structure
 Send-It-Direct/
-¦
+|
 +-- Client/
-¦   +-- app/
-¦   ¦   +-- page.tsx
-¦   ¦   +-- ShareCard.tsx
-¦   ¦   +-- ShareLink.tsx
-¦   ¦   +-- ...
-¦   ¦
-¦   +-- components/
-¦   +-- public/
-¦   +-- package.json
-¦   +-- ...
-¦
+|   +-- app/
+|   |   +-- page.tsx
+|   |   +-- ShareCard.tsx
+|   |   +-- ShareLink.tsx
+|   |   +-- ...
+|   |
+|   +-- components/
+|   +-- public/
+|   +-- package.json
+|   +-- ...
+|
 +-- Server/
-¦   +-- index.js
-¦   +-- package.json
-¦   +-- ...
-¦
+|   +-- index.js
+|   +-- package.json
+|   +-- ...
+|
 +-- .gitignore
 +-- README.md
 Local Development
 Prerequisites
-
-Install:
-
 Node.js 18+
 npm
 Git
@@ -193,4 +176,5 @@ Author
 Ganesh Chavhan
 
 GitHub:
+
 https://github.com/Chavhann
