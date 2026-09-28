@@ -155,7 +155,7 @@ const ShareCard = () => {
     setfileUploadProgress(0);
     setfileDownloadProgress(0);
     setterminateCall(false);
-
+    receiverRef.current?.dispose();
     receiverRef.current = undefined;
     userDetails.setpeerState(undefined);
   };

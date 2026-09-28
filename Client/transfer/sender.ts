@@ -1,4 +1,4 @@
-﻿import {
+import {
   createTransferChunk,
   createTransferComplete,
   createTransferStart,
@@ -30,9 +30,7 @@ export async function sendFile({
   onError,
 }: SendFileOptions): Promise<void> {
   try {
-    if (channel.readyState && channel.readyState !== "open") {
-      throw new Error("Data channel is not open.");
-    }
+    assertChannelOpen(channel);
 
     const startMessage = createTransferStart(transferId, file);
 
@@ -45,6 +43,9 @@ export async function sendFile({
       const end = Math.min(start + FILE_CHUNK_SIZE, file.size);
 
       const buffer = await file.slice(start, end).arrayBuffer();
+
+      assertChannelOpen(channel);
+
       const chunk = new Uint8Array(buffer);
 
       const chunkMessage = createTransferChunk(
@@ -61,6 +62,8 @@ export async function sendFile({
 
       await waitForChannelDrain(channel);
     }
+
+    assertChannelOpen(channel);
 
     const completeMessage = createTransferComplete(
       transferId,
@@ -103,6 +106,12 @@ async function waitForChannelDrain(
 
     check();
   });
+}
+
+function assertChannelOpen(channel: DataChannelLike): void {
+  if (channel.readyState && channel.readyState !== "open") {
+    throw new Error("Data channel is no longer open.");
+  }
 }
 
 function getBufferedAmount(channel: DataChannelLike): number {

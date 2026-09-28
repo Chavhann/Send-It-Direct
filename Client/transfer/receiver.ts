@@ -1,4 +1,4 @@
-﻿import {
+import {
   createTransferAck,
   createTransferError,
   serializeTransferMessage,
@@ -98,6 +98,10 @@ export class FileReceiver {
     }
   }
 
+  dispose(): void {
+    this.transfers.clear();
+  }
+
   cancelTransfer(
     transferId: TransferId,
     reason = "Transfer cancelled."
@@ -181,6 +185,21 @@ export class FileReceiver {
     }
 
     const chunk = new Uint8Array(message.data);
+
+    if (chunk.byteLength > transfer.chunkSize) {
+      throw new Error(
+        `Chunk ${message.sequence} exceeds the declared chunk size.`
+      );
+    }
+
+    if (
+      transfer.receivedBytes + chunk.byteLength >
+      transfer.fileSize
+    ) {
+      throw new Error(
+        `Transfer ${message.transferId} exceeds the declared file size.`
+      );
+    }
 
     transfer.chunks.set(message.sequence, chunk);
     transfer.receivedBytes += chunk.byteLength;
