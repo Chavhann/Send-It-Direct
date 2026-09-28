@@ -46,9 +46,11 @@ const ShareCard = () => {
   const userDetails = useSocket();
 
   const [partnerId, setpartnerId] = useState("");
-  const [isLoading, setisLoading] = useState(false);
+  type ConnectionState = "waiting" | "connecting" | "connected" | "error";
+  const [connectionState, setConnectionState] = useState<ConnectionState>("waiting");
   const [isCopied, setisCopied] = useState(false);
-  const [currentConnection, setcurrentConnection] = useState(false);
+  const currentConnection = connectionState === "connected";
+  const isLoading = connectionState === "connecting";
 
   const peerRef = useRef<any>();
   const receiverRef = useRef<FileReceiver>();
@@ -146,7 +148,7 @@ const ShareCard = () => {
 
   const resetConnectionState = () => {
     setpartnerId("");
-    setcurrentConnection(false);
+    setConnectionState("waiting");
     setfileUpload(undefined);
     setfileSending(false);
     setfileReceiving(false);
@@ -170,28 +172,25 @@ const ShareCard = () => {
 
       if (!peer) {
         toast.error("Connection could not be completed.");
-        setisLoading(false);
+        setConnectionState("waiting");
         return;
       }
 
       peer.signal(data.signalData);
 
-      setisLoading(false);
-      setcurrentConnection(true);
+      setConnectionState("connecting");
       setterminateCall(true);
-
-      toast.success("Peer connection established.");
 
       userDetails.setpeerState(peer);
     };
 
     const handleSignalError = (message: string) => {
-      setisLoading(false);
+      setConnectionState("error");
       toast.error(message || "Signaling failed.");
     };
 
     const handleServerError = (message: string) => {
-      setisLoading(false);
+      setConnectionState("error");
       toast.error(message || "Server error.");
     };
 
@@ -283,8 +282,7 @@ const ShareCard = () => {
     peer.on("error", (err: any) => {
       console.error("WebRTC peer error:", err);
 
-      setisLoading(false);
-      setcurrentConnection(false);
+      setConnectionState("error");
       setterminateCall(false);
       setfileSending(false);
       setfileReceiving(false);
@@ -312,9 +310,8 @@ const ShareCard = () => {
     });
 
     peer.on("connect", () => {
-      setcurrentConnection(true);
+      setConnectionState("connected");
       setterminateCall(true);
-      setisLoading(false);
       userDetails.setpeerState(peer);
     });
   };
@@ -343,10 +340,9 @@ const ShareCard = () => {
     });
 
     peer.on("connect", () => {
-      setcurrentConnection(true);
+      setConnectionState("connected");
       setacceptCaller(false);
       setterminateCall(true);
-      setisLoading(false);
 
       userDetails.setpeerState(peer);
 
@@ -362,18 +358,18 @@ const ShareCard = () => {
     setpartnerId(normalizedPartnerId);
 
     if (!normalizedPartnerId || normalizedPartnerId.length !== 10) {
-      setisLoading(false);
+      setConnectionState("waiting");
       toast.error("Invalid token entered.");
       return;
     }
 
     if (normalizedPartnerId === userDetails.userId) {
-      setisLoading(false);
+      setConnectionState("waiting");
       toast.error("You cannot connect to your own token.");
       return;
     }
 
-    setisLoading(true);
+    setConnectionState("connecting");
 
     callUser();
   };
@@ -507,7 +503,7 @@ const ShareCard = () => {
                 currentConnection ? "bg-emerald-500" : "bg-muted-foreground"
               }`}
             />
-            {currentConnection ? "Connected" : "Waiting"}
+            {connectionState === "connected" ? "Connected" : connectionState === "connecting" ? "Connecting" : connectionState === "error" ? "Connection error" : "Waiting"}
           </div>
         </div>
 
