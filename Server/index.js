@@ -1,4 +1,4 @@
-const dotenv = require("dotenv");
+﻿const dotenv = require("dotenv");
 dotenv.config();
 
 const express = require("express");
@@ -44,9 +44,7 @@ const io = new Server(httpServer, {
   },
 });
 
-// Maps to track users and rooms
-const userRoomMap = new Map();
-const userIdMap = new Map();
+// Maps public peer IDs to their active Socket.IO connections.
 const uniqueIdMap = new Map();
 
 io.on("connection", (socket) => {
@@ -56,44 +54,58 @@ io.on("connection", (socket) => {
     const room = Number(roomNumber);
 
     if (!Number.isFinite(room)) {
-      socket.emit("error", "Invalid room number");
+      socket.emit("server-error", "Invalid room number");
       return;
     }
 
     socket.join(room);
-    userRoomMap.set(socket.id, room);
-
     socket.emit("ack", `You have joined room ${room}`);
   });
 
   socket.on("message", (messageContent) => {
-    const roomNum = userRoomMap.get(socket.id);
+    const rooms = [...socket.rooms].filter((room) => room !== socket.id);
 
-    if (roomNum !== undefined) {
-      io.to(roomNum).emit("roomMsg", messageContent);
+    for (const room of rooms) {
+      io.to(room).emit("roomMsg", messageContent);
     }
   });
 
   socket.on("details", (userData) => {
-    if (!userData?.socketId || !userData?.uniqueId) {
+    const uniqueId =
+      typeof userData?.uniqueId === "string" ? userData.uniqueId.trim() : "";
+
+    if (!uniqueId || uniqueId.length !== 10) {
+      socket.emit("server-error", "Invalid peer ID");
       return;
     }
 
-    const userSocketId = userData.socketId;
-    const uniqueId = userData.uniqueId;
+    const previousSocketId = uniqueIdMap.get(uniqueId);
 
-    userIdMap.set(userSocketId, uniqueId);
-    uniqueIdMap.set(uniqueId, userSocketId);
+    if (previousSocketId && previousSocketId !== socket.id) {
+      io.to(previousSocketId).emit(
+        "server-error",
+        "This peer ID is already connected"
+      );
+      return;
+    }
 
-    console.log(`User registered: ${uniqueId}`);
+    socket.data.uniqueId = uniqueId;
+    uniqueIdMap.set(uniqueId, socket.id);
+
+    console.log(`User registered: ${uniqueId} on socket ${socket.id}`);
+    socket.emit("registered", { uniqueId });
   });
 
   socket.on("send-signal", (signalData) => {
-    if (!signalData?.to || !signalData?.from || !signalData?.signalData) {
+    const targetUniqueId =
+      typeof signalData?.to === "string" ? signalData.to.trim() : "";
+    const signal = signalData?.signalData;
+
+    if (!targetUniqueId || !signal || !socket.data.uniqueId) {
+      socket.emit("signal-error", "Invalid signaling request");
       return;
     }
 
-    const targetUniqueId = signalData.to;
     const partnerSocketId = uniqueIdMap.get(targetUniqueId);
 
     if (!partnerSocketId) {
@@ -102,18 +114,22 @@ io.on("connection", (socket) => {
     }
 
     io.to(partnerSocketId).emit("signaling", {
-      from: signalData.from,
-      signalData: signalData.signalData,
-      to: signalData.to,
+      from: socket.data.uniqueId,
+      signalData: signal,
+      to: targetUniqueId,
     });
   });
 
   socket.on("accept-signal", (signalData) => {
-    if (!signalData?.to || !signalData?.signalData) {
+    const targetUniqueId =
+      typeof signalData?.to === "string" ? signalData.to.trim() : "";
+    const signal = signalData?.signalData;
+
+    if (!targetUniqueId || !signal || !socket.data.uniqueId) {
+      socket.emit("signal-error", "Invalid signaling request");
       return;
     }
 
-    const targetUniqueId = signalData.to;
     const partnerSocketId = uniqueIdMap.get(targetUniqueId);
 
     if (!partnerSocketId) {
@@ -122,22 +138,20 @@ io.on("connection", (socket) => {
     }
 
     io.to(partnerSocketId).emit("callAccepted", {
-      signalData: signalData.signalData,
-      to: signalData.to,
+      from: socket.data.uniqueId,
+      signalData: signal,
+      to: targetUniqueId,
     });
   });
 
   socket.on("disconnect", () => {
-    console.log(`Socket disconnected: ${socket.id}`);
+    const uniqueId = socket.data.uniqueId;
 
-    const associatedUniqueId = userIdMap.get(socket.id);
-
-    userRoomMap.delete(socket.id);
-    userIdMap.delete(socket.id);
-
-    if (associatedUniqueId) {
-      uniqueIdMap.delete(associatedUniqueId);
+    if (uniqueId && uniqueIdMap.get(uniqueId) === socket.id) {
+      uniqueIdMap.delete(uniqueId);
     }
+
+    console.log(`Socket disconnected: ${socket.id}`);
   });
 });
 
