@@ -1,6 +1,6 @@
-# Zippy-Client
+# Send It Direct - Client
 
-Zippy is a peer to peer file sharing application built with Next.js, allowing users to share files quickly and efficiently. The application leverages WebRTC for real-time communication and socket.io for signaling, providing a seamless user experience.
+Send It Direct is a peer-to-peer file sharing application built with Next.js, allowing users to share files quickly and efficiently. The application leverages WebRTC for real-time communication and socket.io for signaling, providing a seamless user experience.
 
 ## Features
 
@@ -11,7 +11,7 @@ Zippy is a peer to peer file sharing application built with Next.js, allowing us
 
 ## Getting Started
 
-To get started with z1ppie, follow these steps:
+To get started with Send It Direct, follow these steps:
 
 ### Prerequisites
 
@@ -25,7 +25,7 @@ Make sure you have the following installed:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/ShivaanjayNarula/Zippy.git
+   git clone https://github.com/Chavhann/Send-It-Direct.git
    cd client
    ```
 

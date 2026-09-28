@@ -25,7 +25,7 @@ const Home = () => {
       text: "using",
     },
     {
-      text: "Zippy.",
+      text: "Send It Direct.",
       className: "underline text-blue-500 dark:text-blue-500",
     },
   ];
@@ -43,7 +43,7 @@ const Home = () => {
         particleColor={"#FFFFFF"}
       />
       <TypewriterEffectSmooth words={words} />
-      A P2P file sharing app over the same network.
+      Peer-to-peer file sharing with real-time communication.
       
 
       <div className="mt-8 gap-3 flex justify-center z-10">
@@ -51,7 +51,7 @@ const Home = () => {
           <EyeCatchingButton_v1>Start sharing files</EyeCatchingButton_v1>
         </Link>
         <Link
-          href={"https://github.com/ShivaanjayNarula/Zippy"}
+          href={"https://github.com/"}
           className="flex items-center"
         >
           <EyeCatchingButton_v1>

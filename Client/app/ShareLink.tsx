@@ -1,3 +1,4 @@
+"use client";
 import React from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,11 +17,11 @@ import toast from "react-hot-toast";
 import { useTheme } from "next-themes";
 
 const ShareLink = ({ userCode }: { userCode: string }) => {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+  const shareUrl = `${appUrl}/share?code=${userCode}`;
   const { theme } = useTheme();
   const handleCopyClick = () => {
-    navigator.clipboard.writeText(
-      `https://zippy-two.vercel.app/share?code=${userCode}`
-    );
+    navigator.clipboard.writeText(shareUrl);
     toast.success("Link Copied");
   };
   return (
@@ -45,7 +46,7 @@ const ShareLink = ({ userCode }: { userCode: string }) => {
             <div className="flex flex-col w-full gap-y-2 justify-center items-center">
               <div className="flex justify-center border rounded-md w-fit p-2">
                 <QRCodeSVG
-                  value={`https://zippy-two.vercel.app/share?code=${userCode}`}
+                  value={shareUrl}
                   size={128}
                   bgColor={theme === "dark" ? "#000000" : "#ffffff"}
                   fgColor={theme === "dark" ? "#ffffff" : "#000000"}
@@ -56,7 +57,7 @@ const ShareLink = ({ userCode }: { userCode: string }) => {
               <div className="flex w-full justify-center gap-x-1">
                 <Input
                   id="link"
-                  defaultValue={`https://zippy-two.vercel.app/share?code=${userCode}`}
+                  defaultValue={shareUrl}
                   readOnly
                 />
                 <Button

@@ -333,7 +333,7 @@ const ShareCard = () => {
     <>
       <Card className="sm:max-w-[450px] max-w-[95%] z-10">
         <CardHeader>
-          <CardTitle>Zippy</CardTitle>
+          <CardTitle>Send It Direct</CardTitle>
           <CardDescription>
             Connect to the same network for P2P to work.
           </CardDescription>

@@ -15,16 +15,16 @@ const Navbar = () => {
           <Image
             className="h-8 w-8 p-0 scale-0 hidden dark:flex dark:scale-100"
             src={rwhite}
-            alt="zippy"
+            alt="Send It Direct"
           />
           <Image
             className="h-8 w-8 p-0 scale-100 flex dark:scale-0 dark:hidden"
             src={rfilled}
-            alt="zippyinv"
+            alt="Send It Direct"
           />
           <Link href="/" className="ml-2 z-10">
-            {/* z1ppie */}
-            <LettersPullUp text="Zippy" />
+            {/* Send It Direct */}
+            <LettersPullUp text="Send It Direct" />
           </Link>
         </div>
         <div className="flex gap-x-2 z-10">

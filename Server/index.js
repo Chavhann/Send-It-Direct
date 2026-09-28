@@ -1,5 +1,6 @@
 const dotenv = require("dotenv");
-dotenv.config({ silent: process.env.NODE_ENV === "production" });
+dotenv.config();
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -7,64 +8,99 @@ const cors = require("cors");
 
 const app = express();
 
-const allowedOrigins = [
-  "*",
-  // "http://localhost:3000", 
-  // "https://zippy-iota.vercel.app/share",
-  // "https://zippy-8ca4mwwba-shivaanjay-narulas-projects.vercel.app/" // Add your frontend URL here
-];
+const PORT = process.env.PORT || 8000;
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: CLIENT_URL,
     credentials: true,
   })
 );
 
+app.use(express.json());
+
 const httpServer = http.createServer(app);
 
 app.get("/", (req, res) => {
-  res.send("hello from server");
+  res.json({
+    name: "Send It Direct",
+    status: "running",
+    service: "signaling-server",
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    service: "send-it-direct-server",
+  });
 });
 
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: CLIENT_URL,
+    credentials: true,
   },
 });
 
 // Maps to track users and rooms
-const userRoomMap = new Map(); // Maps socket IDs to room numbers
-const userIdMap = new Map(); // Maps socket IDs to unique IDs
-const uniqueIdMap = new Map(); // Maps unique IDs to socket IDs
+const userRoomMap = new Map();
+const userIdMap = new Map();
+const uniqueIdMap = new Map();
 
 io.on("connection", (socket) => {
+  console.log(`Socket connected: ${socket.id}`);
+
   socket.on("joinRoom", (roomNumber) => {
-    socket.join(Number(roomNumber));
-    userRoomMap.set(socket.id, Number(roomNumber));
-    socket.emit("ack", `You have joined room ${roomNumber}`);
+    const room = Number(roomNumber);
+
+    if (!Number.isFinite(room)) {
+      socket.emit("error", "Invalid room number");
+      return;
+    }
+
+    socket.join(room);
+    userRoomMap.set(socket.id, room);
+
+    socket.emit("ack", `You have joined room ${room}`);
   });
 
   socket.on("message", (messageContent) => {
     const roomNum = userRoomMap.get(socket.id);
-    io.to(roomNum).emit("roomMsg", messageContent);
+
+    if (roomNum !== undefined) {
+      io.to(roomNum).emit("roomMsg", messageContent);
+    }
   });
 
   socket.on("details", (userData) => {
+    if (!userData?.socketId || !userData?.uniqueId) {
+      return;
+    }
+
     const userSocketId = userData.socketId;
     const uniqueId = userData.uniqueId;
 
     userIdMap.set(userSocketId, uniqueId);
     uniqueIdMap.set(uniqueId, userSocketId);
-    console.log("New User added");
-    for (let [key, value] of userIdMap) {
-      console.log(`${key} = ${value}`);
-    }
+
+    console.log(`User registered: ${uniqueId}`);
   });
 
   socket.on("send-signal", (signalData) => {
-    console.log(signalData);
+    if (!signalData?.to || !signalData?.from || !signalData?.signalData) {
+      return;
+    }
+
     const targetUniqueId = signalData.to;
     const partnerSocketId = uniqueIdMap.get(targetUniqueId);
+
+    if (!partnerSocketId) {
+      socket.emit("signal-error", "Peer is no longer connected");
+      return;
+    }
+
     io.to(partnerSocketId).emit("signaling", {
       from: signalData.from,
       signalData: signalData.signalData,
@@ -73,10 +109,18 @@ io.on("connection", (socket) => {
   });
 
   socket.on("accept-signal", (signalData) => {
-    console.log(signalData);
+    if (!signalData?.to || !signalData?.signalData) {
+      return;
+    }
+
     const targetUniqueId = signalData.to;
     const partnerSocketId = uniqueIdMap.get(targetUniqueId);
-    console.log(partnerSocketId);
+
+    if (!partnerSocketId) {
+      socket.emit("signal-error", "Peer is no longer connected");
+      return;
+    }
+
     io.to(partnerSocketId).emit("callAccepted", {
       signalData: signalData.signalData,
       to: signalData.to,
@@ -85,24 +129,19 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log(`Socket disconnected: ${socket.id}`);
-    const userSocketId = socket.id;
-    const associatedUniqueId = userIdMap.get(userSocketId);
 
-    userIdMap.delete(userSocketId);
-    uniqueIdMap.delete(associatedUniqueId);
+    const associatedUniqueId = userIdMap.get(socket.id);
 
-    console.log("Updated userIdMap:");
-    for (let [key, value] of userIdMap) {
-      console.log(`${key} = ${value}`);
-    }
+    userRoomMap.delete(socket.id);
+    userIdMap.delete(socket.id);
 
-    console.log("Updated uniqueIdMap:");
-    for (let [key, value] of uniqueIdMap) {
-      console.log(`${key} = ${value}`);
+    if (associatedUniqueId) {
+      uniqueIdMap.delete(associatedUniqueId);
     }
   });
 });
 
-httpServer.listen(process.env.PORT || 8000, () => {
-  console.log(`Listening on ${process.env.PORT ? process.env.PORT : "8000"}`);
+httpServer.listen(PORT, () => {
+  console.log(`Send It Direct server listening on port ${PORT}`);
+  console.log(`Allowed client origin: ${CLIENT_URL}`);
 });

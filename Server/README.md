@@ -1,4 +1,4 @@
-# Zippy Backend Server
+# Send It Direct - Backend Server
 
 ## Features
 
@@ -17,7 +17,7 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/ShivaanjayNarula/zippy.git
+   git clone https://github.com/Chavhann/Send-It-Direct.git
    cd server
    ```
 

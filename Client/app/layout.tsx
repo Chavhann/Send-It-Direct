@@ -8,8 +8,8 @@ import { Toaster } from "@/components/ui/toaster";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Zippy",
-  description: "P2P file sharing app.",
+  title: "Send It Direct",
+  description: "Peer-to-peer file sharing and real-time communication.",
   authors: [
     {
       name: "Shivaanjay Narula",
