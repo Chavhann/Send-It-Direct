@@ -18,14 +18,16 @@ const FileUpload = ({
   showProgress,
 }: fileUploadProps) => {
   return (
-    <div className="flex flex-col border rounded-lg  px-3 py-3 text-sm w-full gap-y-2">
+    <div className="flex w-full flex-col gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4 shadow-sm">
       <div className="flex justify-between items-center">
-        <div className="flex">{truncateString(fileName)}</div>
+        <div className="min-w-0 flex-1 truncate font-medium text-sm">
+          {truncateString(fileName)}
+        </div>
         <div className="flex">
           <Button
             type="button"
             
-            className="h-[30px] px-2"
+            className="h-9 shrink-0 rounded-xl px-3 transition-all hover:-translate-y-0.5"
             onClick={() => {
               handleClick();
             }}
@@ -37,7 +39,7 @@ const FileUpload = ({
 
       {showProgress ? (
         <div>
-          <Progress value={fileProgress} className="h-1" />
+          <Progress value={fileProgress} className="h-1.5" />
         </div>
       ) : null}
     </div>
