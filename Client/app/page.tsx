@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Github, LockKeyhole, Radio, Zap } from "lucide-react";
+import { ArrowRight, LockKeyhole, Radio, Zap } from "lucide-react";
 import { SiteFooter } from "./Footer";
-import { BackgroundBeams } from "@/components/ui/bgBeams";
 
 const capabilities = [
   {
@@ -29,8 +28,6 @@ const capabilities = [
 export default function Home() {
   return (
     <main className="relative min-h-[calc(100vh-72px)] overflow-hidden">
-      <BackgroundBeams className="hidden md:block" />
-
       <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col px-5 pb-12 pt-12 sm:px-8 lg:px-10 lg:pt-20">
         <section className="mx-auto flex max-w-4xl flex-col items-center text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur">
@@ -63,15 +60,7 @@ export default function Home() {
               />
             </Link>
 
-            <Link
-              href="https://github.com/Chavhann/Send-It-Direct"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-6 text-sm font-semibold backdrop-blur transition-colors hover:bg-muted sm:w-auto"
-            >
-              <Github size={17} />
-              View on GitHub
-            </Link>
+
           </div>
         </section>
 
