@@ -1,11 +1,11 @@
 import {
   createTransferAck,
   createTransferError,
+  createTransferFinished,
+  createTransferReady,
   serializeTransferMessage,
 } from "./protocol";
-
 import type {
-  TransferChunkMessage,
   TransferId,
   TransferMessage,
   TransferStartMessage,
@@ -15,32 +15,55 @@ type DataChannelLike = {
   send: (data: string) => void;
 };
 
-type IncomingTransfer = {
+type WritableFileStreamLike = {
+  write: (data: Uint8Array) => Promise<void>;
+  close: () => Promise<void>;
+  abort?: (reason?: unknown) => Promise<void>;
+};
+
+export type IncomingTransfer = {
   transferId: TransferId;
   fileName: string;
   fileSize: number;
   fileType: string;
   totalChunks: number;
   chunkSize: number;
-  chunks: Map<number, Uint8Array>;
   receivedBytes: number;
+  receivedChunks: number;
+  ready: boolean;
+  completed: boolean;
+};
+
+type ActiveTransfer = IncomingTransfer & {
+  writable: WritableFileStreamLike | null;
+  expectedSequence: number;
 };
 
 type ReceiverCallbacks = {
   onStart?: (transfer: IncomingTransfer) => void;
-  onProgress?: (transferId: TransferId, progress: number) => void;
-  onComplete?: (
+  onReady?: (transferId: TransferId) => void;
+  onProgress?: (
     transferId: TransferId,
-    file: File
+    progress: number,
+    receivedBytes: number
   ) => void;
-  onCancel?: (transferId: TransferId, reason?: string) => void;
+  onComplete?: (transfer: IncomingTransfer) => void;
+  onCancel?: (
+    transferId: TransferId,
+    reason?: string
+  ) => void;
   onError?: (error: Error) => void;
 };
 
 export class FileReceiver {
   private channel: DataChannelLike;
-  private transfers = new Map<TransferId, IncomingTransfer>();
+  private transfers = new Map<
+    TransferId,
+    ActiveTransfer
+  >();
   private callbacks: ReceiverCallbacks;
+
+  private processing = Promise.resolve();
 
   constructor(
     channel: DataChannelLike,
@@ -50,55 +73,105 @@ export class FileReceiver {
     this.callbacks = callbacks;
   }
 
-  handleMessage(message: TransferMessage): void {
-    try {
-      switch (message.type) {
-        case "transfer-start":
-          this.handleStart(message);
-          break;
+  handleMessage(message: TransferMessage): Promise<void> {
+    this.processing = this.processing
+      .then(async () => {
+        await this.processMessage(message);
+      })
+      .catch((error) => {
+        const normalizedError =
+          error instanceof Error
+            ? error
+            : new Error(
+                "Failed to process transfer message."
+              );
 
-        case "transfer-chunk":
-          this.handleChunk(message);
-          break;
+        this.callbacks.onError?.(
+          normalizedError
+        );
+      });
 
-        case "transfer-complete":
-          this.handleComplete(
-            message.transferId,
-            message.totalChunks
-          );
-          break;
+    return this.processing;
+  }
 
-        case "transfer-cancel":
-          this.handleCancel(
-            message.transferId,
-            message.reason
-          );
-          break;
+  handleChunkFrame(
+    transferId: TransferId,
+    sequence: number,
+    data: Uint8Array
+  ): Promise<void> {
+    this.processing = this.processing
+      .then(async () => {
+        await this.processChunk(
+          transferId,
+          sequence,
+          data
+        );
+      })
+      .catch((error) => {
+        const normalizedError =
+          error instanceof Error
+            ? error
+            : new Error(
+                "Failed to process transfer chunk."
+              );
 
-        case "transfer-ack":
-          // ACKs are primarily consumed by the sender.
-          break;
+        this.sendTransferError(
+          transferId,
+          "CHUNK_WRITE_FAILED",
+          normalizedError.message
+        );
 
-        case "transfer-error":
-          this.handleError(
-            message.message
-          );
-          break;
+        this.callbacks.onError?.(
+          normalizedError
+        );
+      });
 
-        default:
-          throw new Error("Unsupported transfer message.");
-      }
-    } catch (error) {
-      const normalizedError =
-        error instanceof Error
-          ? error
-          : new Error("Failed to process transfer message.");
+    return this.processing;
+  }
 
-      this.callbacks.onError?.(normalizedError);
+  async prepareTransfer(
+    transferId: TransferId,
+    writable: WritableFileStreamLike
+  ): Promise<void> {
+    const transfer =
+      this.transfers.get(transferId);
+
+    if (!transfer) {
+      throw new Error(
+        `Unknown transfer: ${transferId}`
+      );
+    }
+
+    if (transfer.ready) {
+      throw new Error(
+        "Transfer is already prepared."
+      );
+    }
+
+    transfer.writable = writable;
+    transfer.ready = true;
+
+    this.channel.send(
+      serializeTransferMessage(
+        createTransferReady(transferId)
+      )
+    );
+
+    this.callbacks.onReady?.(transferId);
+
+    if (transfer.totalChunks === 0) {
+      await this.finishTransfer(transfer);
     }
   }
 
   dispose(): void {
+    this.transfers.forEach((transfer) => {
+      void this.abortTransfer(
+        transfer,
+        "Connection closed."
+      );
+    });
+
     this.transfers.clear();
   }
 
@@ -106,11 +179,19 @@ export class FileReceiver {
     transferId: TransferId,
     reason = "Transfer cancelled."
   ): void {
-    if (!this.transfers.has(transferId)) {
+    const transfer =
+      this.transfers.get(transferId);
+
+    if (!transfer) {
       return;
     }
 
     this.transfers.delete(transferId);
+
+    void this.abortTransfer(
+      transfer,
+      reason
+    );
 
     this.channel.send(
       serializeTransferMessage({
@@ -120,117 +201,234 @@ export class FileReceiver {
       })
     );
 
-    this.callbacks.onCancel?.(transferId, reason);
+    this.callbacks.onCancel?.(
+      transferId,
+      reason
+    );
   }
 
-  private handleStart(message: TransferStartMessage): void {
-    if (message.fileSize < 0) {
-      throw new Error("Invalid file size.");
+  private async processMessage(
+    message: TransferMessage
+  ): Promise<void> {
+    switch (message.type) {
+      case "transfer-start":
+        this.handleStart(message);
+        return;
+
+      case "transfer-complete":
+        await this.handleComplete(
+          message.transferId,
+          message.totalChunks
+        );
+        return;
+
+      case "transfer-cancel":
+        this.handleCancel(
+          message.transferId,
+          message.reason
+        );
+        return;
+
+      case "transfer-ack":
+        return;
+
+      case "transfer-ready":
+        return;
+
+      case "transfer-finished":
+        return;
+
+      case "transfer-error":
+        this.handleError(message.message);
+        return;
+
+      default:
+        throw new Error(
+          "Unsupported transfer message."
+        );
+    }
+  }
+
+  private handleStart(
+    message: TransferStartMessage
+  ): void {
+    if (
+      !Number.isFinite(message.fileSize) ||
+      message.fileSize < 0
+    ) {
+      throw new Error(
+        "Invalid file size."
+      );
     }
 
-    if (message.totalChunks < 0) {
-      throw new Error("Invalid chunk count.");
+    if (
+      !Number.isSafeInteger(
+        message.totalChunks
+      ) ||
+      message.totalChunks < 0
+    ) {
+      throw new Error(
+        "Invalid chunk count."
+      );
     }
 
-    if (this.transfers.has(message.transferId)) {
+    if (
+      !Number.isSafeInteger(
+        message.chunkSize
+      ) ||
+      message.chunkSize <= 0
+    ) {
+      throw new Error(
+        "Invalid chunk size."
+      );
+    }
+
+    if (
+      this.transfers.has(
+        message.transferId
+      )
+    ) {
       throw new Error(
         `Transfer ${message.transferId} already exists.`
       );
     }
 
-    const transfer: IncomingTransfer = {
+    const transfer: ActiveTransfer = {
       transferId: message.transferId,
       fileName: message.fileName,
       fileSize: message.fileSize,
-      fileType: message.fileType,
+      fileType:
+        message.fileType ||
+        "application/octet-stream",
       totalChunks: message.totalChunks,
       chunkSize: message.chunkSize,
-      chunks: new Map(),
       receivedBytes: 0,
+      receivedChunks: 0,
+      ready: false,
+      completed: false,
+      writable: null,
+      expectedSequence: 0,
     };
 
-    this.transfers.set(message.transferId, transfer);
+    this.transfers.set(
+      message.transferId,
+      transfer
+    );
 
     this.callbacks.onStart?.(transfer);
-
-    if (message.totalChunks === 0) {
-      this.completeEmptyTransfer(transfer);
-    }
   }
 
-  private handleChunk(message: TransferChunkMessage): void {
-    const transfer = this.transfers.get(message.transferId);
+  private async processChunk(
+    transferId: TransferId,
+    sequence: number,
+    data: Uint8Array
+  ): Promise<void> {
+    const transfer =
+      this.transfers.get(transferId);
 
     if (!transfer) {
       throw new Error(
-        `Unknown transfer: ${message.transferId}`
+        `Unknown transfer: ${transferId}`
+      );
+    }
+
+    if (!transfer.ready) {
+      throw new Error(
+        "Receiver has not selected a save location."
+      );
+    }
+
+    if (!transfer.writable) {
+      throw new Error(
+        "File writer is not available."
       );
     }
 
     if (
-      message.sequence < 0 ||
-      message.sequence >= transfer.totalChunks
+      sequence < 0 ||
+      sequence >= transfer.totalChunks
     ) {
       throw new Error(
-        `Invalid chunk sequence: ${message.sequence}`
-      );
-    }
-
-    if (transfer.chunks.has(message.sequence)) {
-      this.sendAck(
-        message.transferId,
-        message.sequence
-      );
-      return;
-    }
-
-    const chunk = new Uint8Array(message.data);
-
-    if (chunk.byteLength > transfer.chunkSize) {
-      throw new Error(
-        `Chunk ${message.sequence} exceeds the declared chunk size.`
+        `Invalid chunk sequence: ${sequence}`
       );
     }
 
     if (
-      transfer.receivedBytes + chunk.byteLength >
+      sequence !== transfer.expectedSequence
+    ) {
+      throw new Error(
+        `Unexpected chunk sequence. Expected ${transfer.expectedSequence}, received ${sequence}.`
+      );
+    }
+
+    if (
+      data.byteLength > transfer.chunkSize
+    ) {
+      throw new Error(
+        `Chunk ${sequence} exceeds the declared chunk size.`
+      );
+    }
+
+    if (
+      transfer.receivedBytes +
+        data.byteLength >
       transfer.fileSize
     ) {
       throw new Error(
-        `Transfer ${message.transferId} exceeds the declared file size.`
+        `Transfer ${transferId} exceeds the declared file size.`
       );
     }
 
-    transfer.chunks.set(message.sequence, chunk);
-    transfer.receivedBytes += chunk.byteLength;
+    await transfer.writable.write(data);
+
+    transfer.receivedBytes +=
+      data.byteLength;
+
+    transfer.receivedChunks += 1;
+    transfer.expectedSequence += 1;
 
     const progress =
       transfer.totalChunks === 0
         ? 100
         : Math.floor(
-            (transfer.chunks.size / transfer.totalChunks) *
+            (transfer.receivedChunks /
+              transfer.totalChunks) *
               100
           );
 
     this.callbacks.onProgress?.(
       transfer.transferId,
-      progress
+      progress,
+      transfer.receivedBytes
     );
 
-    this.sendAck(
-      message.transferId,
-      message.sequence
+    this.channel.send(
+      serializeTransferMessage(
+        createTransferAck(
+          transfer.transferId,
+          sequence
+        )
+      )
     );
   }
 
-  private handleComplete(
+  private async handleComplete(
     transferId: TransferId,
     totalChunks: number
-  ): void {
-    const transfer = this.transfers.get(transferId);
+  ): Promise<void> {
+    const transfer =
+      this.transfers.get(transferId);
 
     if (!transfer) {
-      throw new Error(`Unknown transfer: ${transferId}`);
+      throw new Error(
+        `Unknown transfer: ${transferId}`
+      );
+    }
+
+    if (!transfer.ready) {
+      throw new Error(
+        "Transfer completed before the receiver was ready."
+      );
     }
 
     if (totalChunks !== transfer.totalChunks) {
@@ -239,81 +437,65 @@ export class FileReceiver {
       );
     }
 
-    if (transfer.chunks.size !== transfer.totalChunks) {
+    if (
+      transfer.receivedChunks !==
+      transfer.totalChunks
+    ) {
       throw new Error(
-        `Transfer incomplete: received ${transfer.chunks.size} of ${transfer.totalChunks} chunks.`
+        `Transfer incomplete: received ${transfer.receivedChunks} of ${transfer.totalChunks} chunks.`
       );
     }
 
-    const orderedChunks: Uint8Array[] = [];
-
-    for (
-      let sequence = 0;
-      sequence < transfer.totalChunks;
-      sequence++
+    if (
+      transfer.receivedBytes !==
+      transfer.fileSize
     ) {
-      const chunk = transfer.chunks.get(sequence);
-
-      if (!chunk) {
-        throw new Error(
-          `Missing chunk ${sequence}.`
-        );
-      }
-
-      orderedChunks.push(chunk);
+      throw new Error(
+        `Transfer size mismatch: received ${transfer.receivedBytes} of ${transfer.fileSize} bytes.`
+      );
     }
 
-    const blob = new Blob(orderedChunks, {
-      type: transfer.fileType || "application/octet-stream",
-    });
-
-    const file = new File(
-      [blob],
-      transfer.fileName,
-      {
-        type:
-          transfer.fileType ||
-          "application/octet-stream",
-      }
-    );
-
-    this.transfers.delete(transferId);
-
-    this.callbacks.onProgress?.(
-      transferId,
-      100
-    );
-
-    this.callbacks.onComplete?.(
-      transferId,
-      file
-    );
+    await this.finishTransfer(transfer);
   }
 
-  private completeEmptyTransfer(
-    transfer: IncomingTransfer
-  ): void {
-    const blob = new Blob([], {
-      type: transfer.fileType || "application/octet-stream",
-    });
+  private async finishTransfer(
+    transfer: ActiveTransfer
+  ): Promise<void> {
+    if (transfer.completed) {
+      return;
+    }
 
-    const file = new File(
-      [blob],
-      transfer.fileName,
-      {
-        type:
-          transfer.fileType ||
-          "application/octet-stream",
-      }
-    );
+    if (!transfer.writable) {
+      throw new Error(
+        "File writer is not available."
+      );
+    }
+
+    await transfer.writable.close();
+
+    transfer.completed = true;
 
     this.transfers.delete(
       transfer.transferId
     );
 
-    this.callbacks.onComplete?.(
+    this.callbacks.onProgress?.(
       transfer.transferId,
-      file
+      100,
+      transfer.fileSize
+    );
+
+    this.callbacks.onComplete?.(
+      transfer
+    );
+
+    this.channel.send(
+      serializeTransferMessage(
+        createTransferFinished(
+          transfer.transferId,
+          transfer.fileSize
+        )
+      )
     );
   }
 
@@ -321,7 +503,19 @@ export class FileReceiver {
     transferId: TransferId,
     reason?: string
   ): void {
+    const transfer =
+      this.transfers.get(transferId);
+
+    if (!transfer) {
+      return;
+    }
+
     this.transfers.delete(transferId);
+
+    void this.abortTransfer(
+      transfer,
+      reason || "Transfer cancelled."
+    );
 
     this.callbacks.onCancel?.(
       transferId,
@@ -329,23 +523,46 @@ export class FileReceiver {
     );
   }
 
-  private handleError(message: string): void {
+  private async abortTransfer(
+    transfer: ActiveTransfer,
+    reason: string
+  ): Promise<void> {
+    try {
+      if (transfer.writable?.abort) {
+        await transfer.writable.abort(
+          new Error(reason)
+        );
+      }
+    } catch {
+      // Ignore cleanup errors.
+    }
+  }
+
+  private handleError(
+    message: string
+  ): void {
     this.callbacks.onError?.(
       new Error(message)
     );
   }
 
-  private sendAck(
+  private sendTransferError(
     transferId: TransferId,
-    sequence: number
+    code: string,
+    message: string
   ): void {
-    const ack = createTransferAck(
-      transferId,
-      sequence
-    );
-
-    this.channel.send(
-      serializeTransferMessage(ack)
-    );
+    try {
+      this.channel.send(
+        serializeTransferMessage(
+          createTransferError(
+            code,
+            message,
+            transferId
+          )
+        )
+      );
+    } catch {
+      // The peer may already be disconnected.
+    }
   }
 }

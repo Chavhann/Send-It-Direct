@@ -1,4 +1,4 @@
-﻿export type TransferId = string;
+export type TransferId = string;
 
 export type TransferStartMessage = {
   type: "transfer-start";
@@ -10,11 +10,9 @@ export type TransferStartMessage = {
   chunkSize: number;
 };
 
-export type TransferChunkMessage = {
-  type: "transfer-chunk";
+export type TransferReadyMessage = {
+  type: "transfer-ready";
   transferId: TransferId;
-  sequence: number;
-  data: number[];
 };
 
 export type TransferAckMessage = {
@@ -27,6 +25,12 @@ export type TransferCompleteMessage = {
   type: "transfer-complete";
   transferId: TransferId;
   totalChunks: number;
+};
+
+export type TransferFinishedMessage = {
+  type: "transfer-finished";
+  transferId: TransferId;
+  fileSize: number;
 };
 
 export type TransferCancelMessage = {
@@ -44,8 +48,9 @@ export type TransferErrorMessage = {
 
 export type TransferMessage =
   | TransferStartMessage
-  | TransferChunkMessage
+  | TransferReadyMessage
   | TransferAckMessage
   | TransferCompleteMessage
+  | TransferFinishedMessage
   | TransferCancelMessage
   | TransferErrorMessage;

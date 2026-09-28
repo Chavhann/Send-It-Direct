@@ -1,14 +1,15 @@
 import {
-  createTransferChunk,
+  createTransferChunkFrame,
   createTransferComplete,
   createTransferStart,
   serializeTransferMessage,
   FILE_CHUNK_SIZE,
+  TRANSFER_WINDOW_SIZE,
 } from "./protocol";
 import type { TransferId } from "./types";
 
 type DataChannelLike = {
-  send: (data: string) => void;
+  send: (data: string | Uint8Array) => void;
   readyState?: string;
 };
 
@@ -16,6 +17,9 @@ type SendFileOptions = {
   channel: DataChannelLike;
   file: File;
   transferId: TransferId;
+  waitForReady: () => Promise<void>;
+  waitForAck: (sequence: number) => Promise<void>;
+  waitForFinished: () => Promise<void>;
   onProgress?: (progress: number) => void;
   onComplete?: () => void;
   onError?: (error: Error) => void;
@@ -25,6 +29,9 @@ export async function sendFile({
   channel,
   file,
   transferId,
+  waitForReady,
+  waitForAck,
+  waitForFinished,
   onProgress,
   onComplete,
   onError,
@@ -32,46 +39,86 @@ export async function sendFile({
   try {
     assertChannelOpen(channel);
 
-    const startMessage = createTransferStart(transferId, file);
+    const startMessage = createTransferStart(
+      transferId,
+      file
+    );
 
-    channel.send(serializeTransferMessage(startMessage));
+    channel.send(
+      serializeTransferMessage(startMessage)
+    );
 
-    const totalChunks = Math.ceil(file.size / FILE_CHUNK_SIZE);
+    await waitForReady();
 
-    for (let sequence = 0; sequence < totalChunks; sequence++) {
-      const start = sequence * FILE_CHUNK_SIZE;
-      const end = Math.min(start + FILE_CHUNK_SIZE, file.size);
+    assertChannelOpen(channel);
 
-      const buffer = await file.slice(start, end).arrayBuffer();
+    const totalChunks = Math.ceil(
+      file.size / FILE_CHUNK_SIZE
+    );
 
-      assertChannelOpen(channel);
+    let nextSequence = 0;
 
-      const chunk = new Uint8Array(buffer);
-
-      const chunkMessage = createTransferChunk(
-        transferId,
-        sequence,
-        chunk
+    while (nextSequence < totalChunks) {
+      const windowEnd = Math.min(
+        nextSequence + TRANSFER_WINDOW_SIZE,
+        totalChunks
       );
 
-      channel.send(serializeTransferMessage(chunkMessage));
+      for (
+        let sequence = nextSequence;
+        sequence < windowEnd;
+        sequence++
+      ) {
+        const start =
+          sequence * FILE_CHUNK_SIZE;
 
-      const progress = Math.floor(((sequence + 1) / totalChunks) * 100);
+        const end = Math.min(
+          start + FILE_CHUNK_SIZE,
+          file.size
+        );
 
-      onProgress?.(progress);
+        const buffer = await file
+          .slice(start, end)
+          .arrayBuffer();
 
-      await waitForChannelDrain(channel);
+        assertChannelOpen(channel);
+
+        const chunk = new Uint8Array(buffer);
+
+        channel.send(
+          createTransferChunkFrame(
+            transferId,
+            sequence,
+            chunk
+          )
+        );
+
+        const progress = Math.floor(
+          ((sequence + 1) / totalChunks) * 100
+        );
+
+        onProgress?.(progress);
+      }
+
+      await waitForAck(windowEnd - 1);
+
+      nextSequence = windowEnd;
     }
 
     assertChannelOpen(channel);
 
-    const completeMessage = createTransferComplete(
-      transferId,
-      totalChunks
+    channel.send(
+      serializeTransferMessage(
+        createTransferComplete(
+          transferId,
+          totalChunks
+        )
+      )
     );
 
-    channel.send(serializeTransferMessage(completeMessage));
+    await waitForFinished();
 
+    onProgress?.(100);
     onComplete?.();
   } catch (error) {
     const normalizedError =
@@ -85,41 +132,15 @@ export async function sendFile({
   }
 }
 
-async function waitForChannelDrain(
+function assertChannelOpen(
   channel: DataChannelLike
-): Promise<void> {
-  const bufferedAmount = getBufferedAmount(channel);
-
-  if (bufferedAmount < 512 * 1024) {
-    return;
+): void {
+  if (
+    channel.readyState &&
+    channel.readyState !== "open"
+  ) {
+    throw new Error(
+      "Data channel is no longer open."
+    );
   }
-
-  await new Promise<void>((resolve) => {
-    const check = () => {
-      if (getBufferedAmount(channel) < 256 * 1024) {
-        resolve();
-        return;
-      }
-
-      setTimeout(check, 10);
-    };
-
-    check();
-  });
-}
-
-function assertChannelOpen(channel: DataChannelLike): void {
-  if (channel.readyState && channel.readyState !== "open") {
-    throw new Error("Data channel is no longer open.");
-  }
-}
-
-function getBufferedAmount(channel: DataChannelLike): number {
-  const candidate = channel as DataChannelLike & {
-    bufferedAmount?: number;
-  };
-
-  return typeof candidate.bufferedAmount === "number"
-    ? candidate.bufferedAmount
-    : 0;
 }

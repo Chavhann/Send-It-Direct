@@ -23,8 +23,21 @@ import ShareLink from "./ShareLink";
 import { useSearchParams } from "next/navigation";
 
 import { sendFile } from "../transfer/sender";
-import { FileReceiver } from "../transfer/receiver";
-import { createTransferId, parseTransferMessage } from "../transfer/protocol";
+import {
+  FileReceiver,
+} from "../transfer/receiver";
+import type {
+  IncomingTransfer,
+} from "../transfer/receiver";
+import {
+  createTransferId,
+  isTransferChunkFrame,
+  parseTransferChunkFrame,
+  parseTransferMessage,
+} from "../transfer/protocol";
+import type {
+  TransferId,
+} from "../transfer/types";
 
 const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
 const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
@@ -34,6 +47,18 @@ if (!turnUrl || !turnUsername || !turnCredential) {
   throw new Error("WebRTC TURN configuration is not configured.");
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 const iceServers = [
   {
     urls: turnUrl,
@@ -41,6 +66,81 @@ const iceServers = [
     credential: turnCredential,
   },
 ];
+
+type PendingTransfer = {
+  readyPromise: Promise<void>;
+  resolveReady: () => void;
+  rejectReady: (error: Error) => void;
+  acknowledged: Set<number>;
+  ackWaiters: Map<
+    number,
+    {
+      resolve: () => void;
+      reject: (error: Error) => void;
+    }
+  >;
+  finishedPromise: Promise<void>;
+  resolveFinished: () => void;
+  rejectFinished: (error: Error) => void;
+};
+
+const createPendingTransfer = (): PendingTransfer => {
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+
+  const readyPromise = new Promise<void>(
+    (resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    }
+  );
+
+  let resolveFinished!: () => void;
+  let rejectFinished!: (error: Error) => void;
+
+  const finishedPromise = new Promise<void>(
+    (resolve, reject) => {
+      resolveFinished = resolve;
+      rejectFinished = reject;
+    }
+  );
+
+  return {
+    readyPromise,
+    resolveReady,
+    rejectReady,
+    acknowledged: new Set<number>(),
+    ackWaiters: new Map(),
+    finishedPromise,
+    resolveFinished,
+    rejectFinished,
+  };
+};
+
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      promise,
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 const ShareCard = () => {
   const userDetails = useSocket();
@@ -54,6 +154,18 @@ const ShareCard = () => {
 
   const peerRef = useRef<any>();
   const receiverRef = useRef<FileReceiver>();
+  const pendingTransfersRef = useRef(
+    new Map<TransferId, PendingTransfer>()
+  );
+  const transferStartedAtRef =
+    useRef<number | null>(null);
+
+  const [incomingTransfer, setIncomingTransfer] =
+    useState<IncomingTransfer>();
+  const [fileTransferDuration, setFileTransferDuration] =
+    useState<number>();
+  const [fileTransferComplete, setFileTransferComplete] =
+    useState(false);
 
   const [userId, setuserId] = useState<any>();
   const [signalingData, setsignalingData] = useState<any>();
@@ -107,30 +219,43 @@ const ShareCard = () => {
     receiverRef.current = new FileReceiver(
       {
         send: (message: string) => {
-          peer.write(message);
+          if (!peer.connected) {
+            throw new Error(
+              "Peer connection is no longer available."
+            );
+          }
+
+          peer.send(message);
         },
       },
       {
         onStart: (transfer) => {
+          setIncomingTransfer(transfer);
           setfileReceiving(true);
           setfileDownloadProgress(0);
           setfileNameState(transfer.fileName);
           setdownloadFile(undefined);
         },
 
-        onProgress: (_transferId, progress) => {
+        onProgress: (
+          _transferId,
+          progress
+        ) => {
           setfileReceiving(true);
           setfileDownloadProgress(progress);
         },
 
-        onComplete: (_transferId, file) => {
-          setdownloadFile(file);
+        onComplete: (transfer) => {
+          setIncomingTransfer(undefined);
           setfileDownloadProgress(100);
           setfileReceiving(false);
-          toast.success("File received successfully");
+          toast.success(
+            `File received successfully: ${transfer.fileName}`
+          );
         },
 
         onCancel: (_transferId, reason) => {
+          setIncomingTransfer(undefined);
           setfileReceiving(false);
 
           if (reason) {
@@ -140,7 +265,10 @@ const ShareCard = () => {
 
         onError: (error) => {
           setfileReceiving(false);
-          toast.error(error.message || "File transfer failed.");
+          toast.error(
+            error.message ||
+              "File transfer failed."
+          );
         },
       }
     );
@@ -220,6 +348,21 @@ const ShareCard = () => {
 
   const handlePeerData = (data: any) => {
     try {
+      if (
+        isTransferChunkFrame(data)
+      ) {
+        const frame =
+          parseTransferChunkFrame(data);
+
+        void receiverRef.current?.handleChunkFrame(
+          frame.transferId,
+          frame.sequence,
+          frame.data
+        );
+
+        return;
+      }
+
       let payload: string;
 
       if (typeof data === "string") {
@@ -227,7 +370,9 @@ const ShareCard = () => {
       } else if (data instanceof Uint8Array) {
         payload = new TextDecoder().decode(data);
       } else if (data instanceof ArrayBuffer) {
-        payload = new TextDecoder().decode(new Uint8Array(data));
+        payload = new TextDecoder().decode(
+          new Uint8Array(data)
+        );
       } else {
         payload = String(data);
       }
@@ -238,37 +383,156 @@ const ShareCard = () => {
         return;
       }
 
-      const transferTypes = new Set([
-        "transfer-start",
-        "transfer-chunk",
-        "transfer-ack",
-        "transfer-complete",
-        "transfer-cancel",
-        "transfer-error",
-      ]);
+      const message =
+        parseTransferMessage(payload);
 
-      if (!transferTypes.has(rawMessage?.type)) {
-        console.warn(
-          "[WebRTC] Ignoring unknown data message:",
-          rawMessage
-        );
+      const transferId =
+        "transferId" in message
+          ? message.transferId
+          : undefined;
+
+      if (
+        message.type ===
+        "transfer-ready"
+      ) {
+        const pending =
+          transferId
+            ? pendingTransfersRef.current.get(
+                transferId
+              )
+            : undefined;
+
+        pending?.resolveReady();
         return;
       }
 
-      const message = parseTransferMessage(payload);
+      if (
+        message.type ===
+        "transfer-ack"
+      ) {
+        const pending =
+          pendingTransfersRef.current.get(
+            message.transferId
+          );
 
-      console.log("[WebRTC] Transfer message:", message.type);
+        if (!pending) {
+          return;
+        }
 
-      receiverRef.current?.handleMessage(message);
+        const waiter =
+          pending.ackWaiters.get(
+            message.sequence
+          );
+
+        if (waiter) {
+          pending.ackWaiters.delete(
+            message.sequence
+          );
+          waiter.resolve();
+        } else {
+          pending.acknowledged.add(
+            message.sequence
+          );
+        }
+
+        return;
+      }
+
+      if (
+        message.type ===
+        "transfer-finished"
+      ) {
+        const pending =
+          pendingTransfersRef.current.get(
+            message.transferId
+          );
+
+        pending?.resolveFinished();
+        return;
+      }
+
+      if (
+        message.type ===
+        "transfer-error"
+      ) {
+        const error =
+          new Error(message.message);
+
+        if (message.transferId) {
+          const pending =
+            pendingTransfersRef.current.get(
+              message.transferId
+            );
+
+          if (pending) {
+            pending.rejectReady(error);
+            pending.rejectFinished(error);
+
+            pending.ackWaiters.forEach(
+              (waiter) => {
+                waiter.reject(error);
+              }
+            );
+          }
+        }
+
+        toast.error(message.message);
+        return;
+      }
+
+      if (
+        message.type ===
+        "transfer-cancel"
+      ) {
+        if (message.transferId) {
+          const pending =
+            pendingTransfersRef.current.get(
+              message.transferId
+            );
+
+          const error = new Error(
+            message.reason ||
+              "Transfer cancelled."
+          );
+
+          pending?.rejectReady(error);
+          pending?.rejectFinished(error);
+
+          if (pending) {
+            pending.ackWaiters.forEach(
+              (waiter) => {
+                waiter.reject(error);
+              }
+            );
+          }
+        }
+
+        void receiverRef.current?.handleMessage(
+          message
+        );
+
+        return;
+      }
+
+      void receiverRef.current?.handleMessage(
+        message
+      );
     } catch (error) {
       const normalizedError =
         error instanceof Error
           ? error
-          : new Error("Invalid transfer message.");
+          : new Error(
+              "Invalid transfer message."
+            );
 
-      console.error("[WebRTC] Transfer data error:", normalizedError);
+      console.error(
+        "[WebRTC] Transfer data error:",
+        normalizedError
+      );
 
-      toast.error(normalizedError.message);
+      toast.error(
+        normalizedError.message
+      );
     }
   };
 
@@ -417,57 +681,218 @@ const ShareCard = () => {
     setfileUploadProgress(0);
   };
 
+  const handleIncomingSave = async () => {
+    const transfer = incomingTransfer;
+
+    if (!transfer) {
+      return;
+    }
+
+    const picker = (
+      window as Window & {
+        showSaveFilePicker?: (
+          options?: unknown
+        ) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Uint8Array) => Promise<void>;
+            close: () => Promise<void>;
+            abort?: (reason?: unknown) => Promise<void>;
+          }>;
+        }>;
+      }
+    ).showSaveFilePicker;
+
+    if (!picker) {
+      toast.error(
+        "Your browser does not support direct file saving. Use the latest Chrome or Edge."
+      );
+      return;
+    }
+
+    try {
+      const handle = await picker({
+        suggestedName: transfer.fileName,
+      });
+
+      const writable = await handle.createWritable();
+
+      await receiverRef.current?.prepareTransfer(
+        transfer.transferId,
+        writable
+      );
+
+      setfileReceiving(true);
+      toast.success("Save location selected. Transfer starting.");
+    } catch (error) {
+      const normalizedError =
+        error instanceof Error
+          ? error
+          : new Error("Could not prepare the save location.");
+
+      if (
+        normalizedError.name !== "AbortError"
+      ) {
+        toast.error(normalizedError.message);
+      }
+    }
+  };
+
   const handleWebRTCUpload = async () => {
     const peer = peerRef.current;
     const file = fileUpload?.[0];
 
     if (!peer) {
-      toast.error("No peer connection available.");
+      toast.error(
+        "No peer connection available."
+      );
       return;
     }
 
     if (!file) {
-      toast.error("Please select a file first.");
+      toast.error(
+        "Please select a file first."
+      );
       return;
     }
 
     if (!peer.connected) {
-      toast.error("Peer connection is not ready.");
+      toast.error(
+        "Peer connection is not ready."
+      );
       return;
     }
 
-    const transferId = createTransferId();
+    const transferId =
+      createTransferId();
+
+    const pending =
+      createPendingTransfer();
+
+    pendingTransfersRef.current.set(
+      transferId,
+      pending
+    );
 
     setfileSending(true);
     setfileUploadProgress(0);
+    setFileTransferComplete(false);
+    setFileTransferDuration(undefined);
+    transferStartedAtRef.current = null;
 
     try {
       await sendFile({
         channel: {
-          send: (message: string) => {
-            peer.write(message);
+          send: (
+            data: string | Uint8Array
+          ) => {
+            if (!peer.connected) {
+              throw new Error(
+                "Peer connection is no longer available."
+              );
+            }
+
+            peer.send(data);
           },
         },
+
         file,
         transferId,
 
+        waitForReady: async () => {
+          await withTimeout(
+            pending.readyPromise,
+            5 * 60 * 1000,
+            "Waiting for receiver save location timed out."
+          );
+
+          transferStartedAtRef.current =
+            Date.now();
+        },
+
+        waitForAck: async (sequence) => {
+          if (
+            pending.acknowledged.has(
+              sequence
+            )
+          ) {
+            pending.acknowledged.delete(
+              sequence
+            );
+            return;
+          }
+
+          await withTimeout(
+            new Promise<void>(
+              (resolve, reject) => {
+                pending.ackWaiters.set(
+                  sequence,
+                  {
+                    resolve,
+                    reject,
+                  }
+                );
+              }
+            ),
+            60 * 1000,
+            `Timed out waiting for chunk ${sequence} acknowledgement.`
+          );
+        },
+
+        waitForFinished: async () => {
+          await withTimeout(
+            pending.finishedPromise,
+            120 * 1000,
+            "Timed out waiting for receiver confirmation."
+          );
+        },
+
         onProgress: (progress) => {
-          setfileUploadProgress(progress);
+          setfileUploadProgress(
+            progress
+          );
         },
 
         onComplete: () => {
+          const startedAt =
+            transferStartedAtRef.current;
+
+          const duration =
+            startedAt === null
+              ? 0
+              : Date.now() - startedAt;
+
           setfileUploadProgress(100);
           setfileSending(false);
-          toast.success("File sent successfully");
+          setFileTransferComplete(true);
+          setFileTransferDuration(
+            duration
+          );
+
+          toast.success(
+            "File sent successfully"
+          );
         },
 
         onError: (error) => {
           setfileSending(false);
-          toast.error(error.message || "File transfer failed.");
+          toast.error(
+            error.message ||
+              "File transfer failed."
+          );
         },
       });
-    } catch {
+    } catch (error) {
       setfileSending(false);
+
+      if (error instanceof Error) {
+        toast.error(error.message);
+      }
+    } finally {
+      pendingTransfersRef.current.delete(
+        transferId
+      );
+      transferStartedAtRef.current =
+        null;
     }
   };
 
@@ -630,6 +1055,61 @@ const ShareCard = () => {
         </div>
       </div>
 
+      {incomingTransfer ? (
+        <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/[0.04] p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                Incoming file
+              </p>
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {incomingTransfer.fileName}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatFileSize(incomingTransfer.fileSize)}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleIncomingSave}
+              disabled={incomingTransfer.ready}
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {incomingTransfer.ready
+                ? "Ready"
+                : "Choose save location"}
+            </button>
+          </div>
+
+          {incomingTransfer.ready ? (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  Receiving
+                </span>
+                <span className="font-semibold text-blue-500">
+                  {fileDownloadProgress}%
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all"
+                  style={{
+                    width: `${fileDownloadProgress}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Choose where the received file should be saved.
+            </p>
+          )}
+        </div>
+      ) : null}
+
       {fileUpload ? (
         <div
           onClick={(e) => e.stopPropagation()}
@@ -640,6 +1120,8 @@ const ShareCard = () => {
             fileProgress={fileUploadProgress}
             handleClick={handleWebRTCUpload}
             showProgress={fileSending}
+            transferComplete={fileTransferComplete}
+            transferDuration={fileTransferDuration}
           />
         </div>
       ) : null}
