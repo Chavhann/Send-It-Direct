@@ -38,6 +38,12 @@ import {
 import type {
   TransferId,
 } from "../transfer/types";
+import {
+  loadTransferHistory,
+  TRANSFER_HISTORY_STORAGE_KEY,
+  upsertTransferHistory,
+} from "../transfer/history";
+import type { TransferHistoryEntry } from "../transfer/history";
 
 const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
 const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
@@ -182,6 +188,10 @@ const ShareCard = () => {
   const [fileNameState, setfileNameState] = useState<any>();
   const [fileSending, setfileSending] = useState(false);
   const [fileReceiving, setfileReceiving] = useState(false);
+  const [transferHistory, setTransferHistory] = useState<TransferHistoryEntry[]>([]);
+  const transferHistoryStartedAtRef = useRef(new Map<string, number>());
+  const receiveHistoryStartedAtRef = useRef(new Map<string, number>());
+  const activeReceiveHistoryRef = useRef<IncomingTransfer | null>(null);
 
   const searchParams = useSearchParams();
 
@@ -198,6 +208,25 @@ const ShareCard = () => {
   useEffect(() => {
     setuserId(userDetails.userId);
   }, [userDetails.userId]);
+
+  useEffect(() => {
+    setTransferHistory(loadTransferHistory());
+  }, []);
+
+  const recordTransferHistory = (entry: TransferHistoryEntry) => {
+    setTransferHistory((current) => {
+      const next = upsertTransferHistory(current, entry);
+      try {
+        window.localStorage.setItem(
+          TRANSFER_HISTORY_STORAGE_KEY,
+          JSON.stringify(next)
+        );
+      } catch {
+        // Keep the in-memory history usable if browser storage is unavailable.
+      }
+      return next;
+    });
+  };
 
   const copyToClipboard = async (value: string) => {
     if (!value) return;
@@ -235,6 +264,17 @@ const ShareCard = () => {
           setfileDownloadProgress(0);
           setfileNameState(transfer.fileName);
           setdownloadFile(undefined);
+          const historyStartedAt = Date.now();
+          receiveHistoryStartedAtRef.current.set(transfer.transferId, historyStartedAt);
+          activeReceiveHistoryRef.current = transfer;
+          recordTransferHistory({
+            id: "received-" + transfer.transferId,
+            direction: "received",
+            fileName: transfer.fileName,
+            fileSize: transfer.fileSize,
+            startedAt: historyStartedAt,
+            status: "in-progress",
+          });
         },
 
         onProgress: (
@@ -246,6 +286,19 @@ const ShareCard = () => {
         },
 
         onComplete: (transfer) => {
+          const historyStartedAt = receiveHistoryStartedAtRef.current.get(transfer.transferId) ?? Date.now();
+          recordTransferHistory({
+            id: "received-" + transfer.transferId,
+            direction: "received",
+            fileName: transfer.fileName,
+            fileSize: transfer.fileSize,
+            startedAt: historyStartedAt,
+            completedAt: Date.now(),
+            durationMs: Date.now() - historyStartedAt,
+            status: "completed",
+          });
+          receiveHistoryStartedAtRef.current.delete(transfer.transferId);
+          activeReceiveHistoryRef.current = null;
           setIncomingTransfer(undefined);
           setfileDownloadProgress(100);
           setfileReceiving(false);
@@ -254,7 +307,24 @@ const ShareCard = () => {
           );
         },
 
-        onCancel: (_transferId, reason) => {
+        onCancel: (transferId, reason) => {
+          const active = activeReceiveHistoryRef.current;
+          const historyStartedAt = receiveHistoryStartedAtRef.current.get(transferId);
+          if (active?.transferId === transferId && historyStartedAt !== undefined) {
+            recordTransferHistory({
+              id: "received-" + transferId,
+              direction: "received",
+              fileName: active.fileName,
+              fileSize: active.fileSize,
+              startedAt: historyStartedAt,
+              completedAt: Date.now(),
+              durationMs: Date.now() - historyStartedAt,
+              status: "cancelled",
+              error: reason,
+            });
+          }
+          receiveHistoryStartedAtRef.current.delete(transferId);
+          activeReceiveHistoryRef.current = null;
           setIncomingTransfer(undefined);
           setfileReceiving(false);
 
@@ -264,6 +334,23 @@ const ShareCard = () => {
         },
 
         onError: (error) => {
+          const active = activeReceiveHistoryRef.current;
+          if (active) {
+            const historyStartedAt = receiveHistoryStartedAtRef.current.get(active.transferId) ?? Date.now();
+            recordTransferHistory({
+              id: "received-" + active.transferId,
+              direction: "received",
+              fileName: active.fileName,
+              fileSize: active.fileSize,
+              startedAt: historyStartedAt,
+              completedAt: Date.now(),
+              durationMs: Date.now() - historyStartedAt,
+              status: "failed",
+              error: error.message,
+            });
+            receiveHistoryStartedAtRef.current.delete(active.transferId);
+            activeReceiveHistoryRef.current = null;
+          }
           setfileReceiving(false);
           toast.error(
             error.message ||
@@ -775,6 +862,16 @@ const ShareCard = () => {
 
     setfileSending(true);
     setfileUploadProgress(0);
+    const historyStartedAt = Date.now();
+    transferHistoryStartedAtRef.current.set(transferId, historyStartedAt);
+    recordTransferHistory({
+      id: "sent-" + transferId,
+      direction: "sent",
+      fileName: file.name,
+      fileSize: file.size,
+      startedAt: historyStartedAt,
+      status: "in-progress",
+    });
     setFileTransferComplete(false);
     setFileTransferDuration(undefined);
     transferStartedAtRef.current = null;
@@ -792,6 +889,21 @@ const ShareCard = () => {
             }
 
             peer.send(data);
+          },
+          waitForCapacity: async () => {
+            while (peer.connected && peer.bufferSize > 1024 * 1024) {
+              await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+              if (peer.bufferSize > 512 * 1024) {
+                continue;
+              }
+
+              break;
+            }
+
+            if (!peer.connected) {
+              throw new Error("Peer connection is no longer available.");
+            }
           },
         },
 
@@ -853,6 +965,8 @@ const ShareCard = () => {
         },
 
         onComplete: () => {
+          const historyStartedAt = transferHistoryStartedAtRef.current.get(transferId) ?? Date.now();
+          const completedAt = Date.now();
           const startedAt =
             transferStartedAtRef.current;
 
@@ -867,6 +981,17 @@ const ShareCard = () => {
           setFileTransferDuration(
             duration
           );
+          recordTransferHistory({
+            id: "sent-" + transferId,
+            direction: "sent",
+            fileName: file.name,
+            fileSize: file.size,
+            startedAt: historyStartedAt,
+            completedAt,
+            durationMs: duration,
+            status: "completed",
+          });
+          transferHistoryStartedAtRef.current.delete(transferId);
 
           toast.success(
             "File sent successfully"
@@ -874,6 +999,19 @@ const ShareCard = () => {
         },
 
         onError: (error) => {
+          const historyStartedAt = transferHistoryStartedAtRef.current.get(transferId) ?? Date.now();
+          recordTransferHistory({
+            id: "sent-" + transferId,
+            direction: "sent",
+            fileName: file.name,
+            fileSize: file.size,
+            startedAt: historyStartedAt,
+            completedAt: Date.now(),
+            durationMs: Date.now() - historyStartedAt,
+            status: "failed",
+            error: error.message,
+          });
+          transferHistoryStartedAtRef.current.delete(transferId);
           setfileSending(false);
           toast.error(
             error.message ||
@@ -882,6 +1020,19 @@ const ShareCard = () => {
         },
       });
     } catch (error) {
+      const historyStartedAt = transferHistoryStartedAtRef.current.get(transferId) ?? Date.now();
+      recordTransferHistory({
+        id: "sent-" + transferId,
+        direction: "sent",
+        fileName: file.name,
+        fileSize: file.size,
+        startedAt: historyStartedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - historyStartedAt,
+        status: "failed",
+        error: error instanceof Error ? error.message : "File transfer failed.",
+      });
+      transferHistoryStartedAtRef.current.delete(transferId);
       setfileSending(false);
 
       if (error instanceof Error) {
@@ -1165,6 +1316,63 @@ const ShareCard = () => {
           )}
         </div>
       </div>
+
+      <section className="mt-6 border-t border-border/60 pt-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Transfer History</p>
+            <p className="mt-1 text-xs text-muted-foreground">Saved in this browser</p>
+          </div>
+          {transferHistory.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setTransferHistory([]);
+                try {
+                  window.localStorage.removeItem(TRANSFER_HISTORY_STORAGE_KEY);
+                } catch {}
+              }}
+              className="text-xs text-muted-foreground underline"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+        {transferHistory.length === 0 ? (
+          <p className="rounded-xl bg-muted/30 p-4 text-sm text-muted-foreground">
+            Your sent and received transfers will appear here.
+          </p>
+        ) : (
+          <div className="max-h-80 space-y-2 overflow-y-auto">
+            {transferHistory.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-border/60 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{entry.fileName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {entry.direction === "sent" ? "Sent" : "Received"} · {formatFileSize(entry.fileSize)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {new Date(entry.completedAt ?? entry.startedAt).toLocaleString()}
+                      {entry.durationMs !== undefined ? " · " + Math.max(1, Math.round(entry.durationMs / 1000)) + "s" : ""}
+                    </p>
+                    {entry.error ? <p className="mt-1 text-xs text-red-500">{entry.error}</p> : null}
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-xs ${
+                    entry.status === "completed"
+                      ? "bg-green-500/10 text-green-600"
+                      : entry.status === "failed" || entry.status === "cancelled"
+                        ? "bg-red-500/10 text-red-500"
+                        : "bg-blue-500/10 text-blue-500"
+                  }`}>
+                    {entry.status === "in-progress" ? "In progress" : entry.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {acceptCaller ? (
         <div className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
