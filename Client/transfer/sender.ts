@@ -11,6 +11,7 @@ import type { TransferId } from "./types";
 type DataChannelLike = {
   send: (data: string | Uint8Array) => void;
   readyState?: string;
+  waitForCapacity?: () => Promise<void>;
 };
 
 type SendFileOptions = {
@@ -85,13 +86,11 @@ export async function sendFile({
 
         const chunk = new Uint8Array(buffer);
 
-        channel.send(
-          createTransferChunkFrame(
-            transferId,
-            sequence,
-            chunk
-          )
-        );
+        await channel.waitForCapacity?.();
+
+        assertChannelOpen(channel);
+
+        channel.send(createTransferChunkFrame(transferId, sequence, chunk));
 
         const progress = Math.floor(
           ((sequence + 1) / totalChunks) * 100

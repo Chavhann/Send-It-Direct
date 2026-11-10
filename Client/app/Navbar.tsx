@@ -4,8 +4,12 @@ import React from "react";
 import Link from "next/link";
 import { FolderOpen, Home, Wifi } from "lucide-react";
 import ThemeButton from "./ThemeButton";
+import { useSocket } from "./SP";
 
 const Navbar = () => {
+  const { socketId } = useSocket();
+  const isConnected = Boolean(socketId);
+
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/90 backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -30,9 +34,20 @@ const Navbar = () => {
 
           <div className="hidden h-7 w-px bg-border sm:block" />
 
-          <div className="hidden items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1.5 text-xs font-semibold text-muted-foreground sm:flex">
-            <span className="h-2 w-2 rounded-full bg-muted-foreground" />
-            <span>Not connected</span>
+          <div
+            className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold sm:flex ${
+              isConnected
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                : "border-border bg-muted/30 text-muted-foreground"
+            }`}
+            aria-live="polite"
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                isConnected ? "bg-emerald-500" : "bg-muted-foreground"
+              }`}
+            />
+            <span>{isConnected ? "Connected" : "Disconnected"}</span>
           </div>
         </div>
 
@@ -50,7 +65,10 @@ const Navbar = () => {
           </div>
 
           <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-card/40 sm:hidden">
-            <Wifi size={15} className="text-muted-foreground" />
+            <Wifi
+              size={15}
+              className={isConnected ? "text-emerald-500" : "text-muted-foreground"}
+            />
           </div>
         </nav>
       </div>
