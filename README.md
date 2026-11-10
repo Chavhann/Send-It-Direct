@@ -1,104 +1,194 @@
-# Zippy
+# Send It Direct
 
-Zippy is a peer to peer file sharing application built with Next.js, allowing users to share files quickly and efficiently. The application leverages WebRTC for real-time communication and socket.io for signaling, providing a seamless user experience.
+**Peer-to-peer file sharing with real-time communication.**
+
+Send It Direct is a web-based peer-to-peer file-sharing application designed to let users connect and exchange files directly between devices. It uses WebRTC for peer connections and Socket.IO for real-time signaling between connected users.
 
 ## Features
 
-- **P2P File Sharing**: Share files directly between users without the need for a central server.
-- **Real-time Chat**: Communicate with peers while sharing files.
-- **Responsive Design**: Works on various devices and screen sizes.
-- **Easy to Use**: Intuitive interface for quick file sharing.
+- **Peer-to-Peer File Sharing:** Transfer files directly between connected devices using WebRTC.
+- **Chunk-Based Transfer:** Divide files into 32 KB chunks for structured transmission.
+- **Transfer Window Management:** Send chunks in windows of up to 64 chunks before waiting for acknowledgement.
+- **Transfer Progress:** Track sending and receiving progress.
+- **Transfer Validation:** Validate file sizes, chunk sequences, and transfer completion.
+- **Transfer Cancellation:** Support cancelling an active transfer.
+- **Real-Time Signaling:** Coordinate peer connections through Socket.IO.
+- **Peer Registration:** Identify connected peers using unique IDs.
+- **Room Messaging:** Exchange messages between users in shared rooms.
+- **Transfer Error Handling:** Handle invalid messages, interrupted connections, and transfer errors.
+
+## Transfer Management
+
+Send It Direct maintains a browser-based transfer history using local storage.
+
+Each history entry records:
+
+- Transfer ID
+- File name and size
+- Transfer direction (sent or received)
+- Start and completion timestamps
+- Transfer duration
+- Transfer status
+- Error information when available
+
+The application retains up to 100 transfer history entries.
+
+## WebRTC Connectivity
+
+The application uses WebRTC peer connections with a configured TURN server for network connectivity.
+
+The Socket.IO backend handles peer registration and signaling, while file data is transferred through the WebRTC data channel.
+
+## Transfer Protocol
+
+The transfer implementation includes:
+
+- 32 KB file chunks
+- A sending window of up to 64 chunks
+- Chunk acknowledgements
+- Transfer-ready and transfer-finished messages
+- File-size and chunk-sequence validation
+- Cancellation and error messages
+- Transfer progress callbacks
+
+
+## Technology Stack
+
+### Frontend
+- Next.js 14
+- React 18
+- TypeScript
+- Tailwind CSS
+- WebRTC
+- Simple Peer
+- Socket.IO Client
+
+### Backend
+- Node.js
+- Express.js
+- Socket.IO
+- CORS
+- dotenv
+
+## Project Structure
+
+```text
+Sent-It-Direct/
+├── Client/
+│   ├── app/
+│   ├── assets/
+│   ├── components/
+│   ├── hooks/
+│   ├── lib/
+│   ├── transfer/
+│   ├── package.json
+│   └── README.md
+│
+├── Server/
+│   ├── index.js
+│   ├── package.json
+│   └── README.md
+│
+├── .gitignore
+└── README.md
+```
 
 ## Getting Started
 
-To get started with z1ppie, follow these steps:
-
 ### Prerequisites
 
-Make sure you have the following installed:
+- Node.js
+- npm
 
-- Node.js (v14 or later)
-- npm (v6 or later) or Yarn
+### 1. Clone the repository
 
-# Zippy-Client
+```bash
+git clone https://github.com/Chavhann/Send-It-Direct.git
+cd Send-It-Direct
+```
 
-### Installation
+### 2. Start the backend
 
-1. Clone the repository:
+```bash
+cd Server
+npm install
+```
 
-   ```bash
-   git clone https://github.com/ShivaanjayNarula/Zippy.git
-   cd client
-   ```
+Create a `.env` file in the `Server` directory:
 
-2. Install the dependencies:
+```env
+PORT=8000
+CLIENT_URL=http://localhost:3000
+```
 
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+Start the server:
 
-3. Set up your environment variables. Create a `.env` file in the root directory and add your socket server URL:
+```bash
+npm start
+```
 
-   ```
-   NEXT_PUBLIC_SOCKET_SERVER_URL=your_socket_server_url
-   ```
-   > You can use http://localhost:8000 as the socket server url for a local environment.
+The backend runs at:
 
-4. Run the development server:
+`http://localhost:8000`
 
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
+Health check:
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser to see the application in action.
+`http://localhost:8000/health`
 
-# Zippy-Server
+### 3. Start the frontend
 
-### Installation
+Open another terminal:
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ShivaanjayNarula/zippy.git
-   cd server
-   ```
+```bash
+cd Client
+npm install
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+Configure the frontend environment variables according to the application's Socket.IO connection configuration.
 
-3. Start the server:
-   ```bash
-   npm start
-   ```
+Start the development server:
 
-4. 5. Open [http://localhost:8000](http://localhost:8000) in your browser to see the application in action.
+```bash
+npm run dev
+```
 
-## Usage
-  > Note that both the peers should be on the same network to communicate.
-- Navigate to the home page and click on "Start sharing" to begin.
-- Enter the peer's token to connect and start sharing files.
-- Use the chat feature to communicate with your peers during the file transfer.
+The frontend runs at:
 
-## Technologies Used
+`http://localhost:3000`
 
-- **Next.js**: A React framework for building server-rendered applications.
-- **WebRTC**: For real-time peer-to-peer communication.
-- **Socket.io**: For signaling and real-time event handling.
-- **React**: A JavaScript library for building user interfaces.
-- **Tailwind CSS**: For styling the application.
-- **Aceternity & Shadcn**: For beautiful components.
+## Architecture
 
-## Contributing
+1. The frontend connects to the backend signaling server using Socket.IO.
+2. Users register their peer IDs with the signaling server.
+3. The server helps exchange WebRTC signaling information between peers.
+4. WebRTC establishes the peer-to-peer connection.
+5. Data can then be exchanged directly between connected peers.
 
-Contributions are welcome! If you have suggestions for improvements or new features, feel free to open an issue or submit a pull request.
+The signaling server coordinates connections; it does not itself establish the direct peer-to-peer data channel.
 
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/YourFeature`).
-3. Make your changes and commit them (`git commit -m 'Add some feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a pull request.
+## Configuration
+
+| Variable | Description | Default |
+|---|---|---|
+| `PORT` | Backend server port | `8000` |
+| `CLIENT_URL` | Allowed frontend origin | `http://localhost:3000` |
+
+## Development
+
+Frontend:
+
+```bash
+cd Client
+npm run dev
+```
+
+Backend:
+
+```bash
+cd Server
+npm start
+```
+
+## License
+
+License information will be added separately.

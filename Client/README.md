@@ -1,80 +1,65 @@
-# Zippy-Client
+# Send It Direct — Frontend
 
-Zippy is a peer to peer file sharing application built with Next.js, allowing users to share files quickly and efficiently. The application leverages WebRTC for real-time communication and socket.io for signaling, providing a seamless user experience.
+The frontend application for Send It Direct, built with Next.js, React, TypeScript, and Tailwind CSS.
 
-## Features
+## Technologies
 
-- **P2P File Sharing**: Share files directly between users without the need for a central server.
-- **Real-time Chat**: Communicate with peers while sharing files.
-- **Responsive Design**: Works on various devices and screen sizes.
-- **Easy to Use**: Intuitive interface for quick file sharing.
+- Next.js 14
+- React 18
+- TypeScript
+- Tailwind CSS
+- WebRTC
+- Simple Peer
+- Socket.IO Client
 
-## Getting Started
+## Installation
 
-To get started with z1ppie, follow these steps:
+```bash
+npm install
+```
 
-### Prerequisites
+## Environment Configuration
 
-Make sure you have the following installed:
+Configure the frontend's Socket.IO server URL using the environment variable expected by the application.
 
-- Node.js (v14 or later)
-- npm (v6 or later) or Yarn
+Check the Socket.IO connection configuration in the source code before choosing the variable name.
 
-### Installation
+## Run Development Server
 
-1. Clone the repository:
+```bash
+npm run dev
+```
 
-   ```bash
-   git clone https://github.com/ShivaanjayNarula/Zippy.git
-   cd client
-   ```
+Open:
 
-2. Install the dependencies:
+`http://localhost:3000`
 
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+## Production Build
 
-3. Set up your environment variables. Create a `.env` file in the root directory and add your socket server URL:
+```bash
+npm run build
+npm start
+```
 
-   ```
-   NEXT_PUBLIC_SOCKET_SERVER_URL=your_socket_server_url
-   ```
-   > You can use http://localhost:8000 as the socket server url for a local environment.
+## Available Scripts
 
-4. Run the development server:
+| Command | Description |
+|---|---|
+| `npm run dev` | Start development server |
+| `npm run build` | Build production application |
+| `npm start` | Start production server |
+| `npm run lint` | Run Next.js lint command |
 
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
+## Folder Structure
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser to see the application in action.
-
-## Usage
-  > Note that both the peers should be on the same network to communicate.
-- Navigate to the home page and click on "Start sharing" to begin.
-- Enter the peer's token to connect and start sharing files.
-- Use the chat feature to communicate with your peers during the file transfer.
-
-## Technologies Used
-
-- **Next.js**: A React framework for building server-rendered applications.
-- **WebRTC**: For real-time peer-to-peer communication.
-- **Socket.io**: For signaling and real-time event handling.
-- **React**: A JavaScript library for building user interfaces.
-- **Tailwind CSS**: For styling the application.
-- **Aceternity & Shadcn**: For beautiful components.
-
-## Contributing
-
-Contributions are welcome! If you have suggestions for improvements or new features, feel free to open an issue or submit a pull request.
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/YourFeature`).
-3. Make your changes and commit them (`git commit -m 'Add some feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a pull request.
+```text
+Client/
+├── app/
+├── assets/
+├── components/
+├── hooks/
+├── lib/
+├── transfer/
+├── package.json
+└── README.md
+```

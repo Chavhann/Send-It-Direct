@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 const cardContent = {
-    title: "How z1ppie works",
+    title: "How Send It Direct works",
   };
   const CardBody = ({ className = "p-4" }) => (
     <div className={cn("text-left", className)}>
@@ -9,11 +9,11 @@ const cardContent = {
         {cardContent.title}
       </h3>
       <ul className="list-disc list-inside">
-      <li><strong>P2P (Peer-to-Peer)</strong>: z1ppie utilizes a peer-to-peer architecture, allowing users to share files directly with each other without the need for a central server.</li>
+      <li><strong>P2P (Peer-to-Peer)</strong>: Send It Direct utilizes a peer-to-peer architecture, allowing users to share files directly with each other without the need for a central server.</li>
       <li><strong>Secure</strong>: The application ensures secure file transfers by establishing direct connections between peers, minimizing the risk of data interception.</li>
-      <li><strong>Fast</strong>: By leveraging direct connections, z1ppie enables rapid file transfers, significantly reducing latency compared to traditional methods.</li>
+      <li><strong>Fast</strong>: By leveraging direct connections, Send It Direct enables rapid file transfers, significantly reducing latency compared to traditional methods.</li>
       <li><strong>Connected with Same Network</strong>: Users on the same local network can connect seamlessly, enhancing transfer speeds and reliability.</li>
-      <li><strong>WebRTC</strong>: z1ppie employs WebRTC technology to facilitate real-time communication and data sharing between peers, enabling efficient file transfers.</li>
+      <li><strong>WebRTC</strong>: Send It Direct employs WebRTC technology to facilitate real-time communication and data sharing between peers, enabling efficient file transfers.</li>
       <li><strong>Socket.io</strong>: The application uses Socket.io for signaling, allowing peers to discover each other and establish connections in real-time.</li>
     </ul>
     </div>
